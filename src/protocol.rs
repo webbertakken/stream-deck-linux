@@ -22,6 +22,8 @@ pub const FEATURE_LEN: usize = 32;
 pub const INPUT_REPORT_ID: u8 = 0x01;
 /// Offset within an input report where the per-key state bytes begin.
 pub const KEY_STATE_OFFSET: usize = 4;
+/// Full size of a button input report (report id + 511 payload bytes).
+pub const INPUT_REPORT_LEN: usize = 512;
 
 /// Build the feature report that sets display brightness (`0..=100`).
 pub fn brightness_feature(percent: u8) -> [u8; FEATURE_LEN] {

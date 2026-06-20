@@ -4,9 +4,15 @@
 //! dependency). The protocol constants are grounded in the device's own HID
 //! report descriptor, not guessed.
 
+pub mod device;
 pub mod error;
+pub mod events;
+pub mod hid;
 pub mod image;
 pub mod model;
 pub mod protocol;
 
+pub use device::StreamDeck;
 pub use error::{Error, Result};
+pub use events::{diff_states, KeyEvent, KeyEventKind};
+pub use model::Model;
