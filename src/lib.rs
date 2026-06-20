@@ -1,0 +1,10 @@
+//! Custom Linux control library for Elgato Stream Deck devices.
+//!
+//! Talks to the device directly over `/dev/hidraw*` (no libudev/hidapi
+//! dependency). The protocol constants are grounded in the device's own HID
+//! report descriptor, not guessed.
+
+pub mod error;
+pub mod protocol;
+
+pub use error::{Error, Result};

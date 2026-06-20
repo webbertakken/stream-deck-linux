@@ -1,0 +1,24 @@
+[package]
+name = "stream-deck-linux"
+version = "0.1.0"
+edition = "2021"
+description = "Custom Linux control software for Elgato Stream Deck devices"
+license = "MIT"
+repository = "https://github.com/webbertakken/stream-deck-linux"
+
+[lib]
+name = "streamdeck"
+path = "src/lib.rs"
+
+[[bin]]
+name = "streamdeck"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+thiserror = "2"
+
+[profile.release]
+opt-level = 3
+lto = true

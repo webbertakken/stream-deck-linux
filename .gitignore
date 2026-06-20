@@ -1,0 +1,8 @@
+/target
+Cargo.lock.bak
+*.swp
+
+# Local working notes (per software-factory conventions)
+/AMBIGUITIES.md
+/DECISIONS.md
+/LESSONS_LEARNED.md
