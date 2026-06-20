@@ -46,9 +46,24 @@ libudev/hidapi system dependency. `image` crate for the picture pipeline.
 - [x] On-key text labels (bundled font, rendered onto keys, verified)
 
 ### Daemon + ergonomics
-- [ ] `streamdeckd` long-running daemon, graceful reset on exit
-- [ ] Hot-reload config on change
-- [ ] CLI: list devices, set brightness, set image, reset
-- [ ] udev rule doc / install helper (uaccess already present here)
-- [ ] CI: fmt + clippy + test
-- [ ] README with setup + usage
+- [x] CLI: list devices, set brightness, set image, reset
+- [x] udev rule doc (uaccess already present here) - in README
+- [x] CI: fmt + clippy + test
+- [x] README with setup + usage
+- [ ] `run` mode hot-reloads config on file change
+
+### Desktop integration (icon, tray, UI, autostart)
+Desktop verified: Linux Mint 22.3 Cinnamon, X11. SNI tray host present
+(`xapp-sn-watcher`), so a pure-Rust `ksni` tray works without GTK.
+
+- [x] App icon generated (5x3 key grid PNGs, `assets/icons/`)
+- [ ] System tray (ksni/SNI): status + menu (open editor, brightness, reload,
+      reset, quit); uses the app icon
+- [ ] Tray app architecture: `streamdeck tray` runs embedded device daemon in a
+      thread + tray on the main thread; actions via a control channel
+- [ ] Autostart on login: install/remove `~/.config/autostart/streamdeck.desktop`
+      (`streamdeck autostart enable|disable|status`)
+- [ ] Config editor UI: 5x3 key grid; click a key to set image/colour/label/
+      action; live-apply to device + save TOML (toolkit pending decision)
+- [ ] `streamdeck install` helper: copy icon to hicolor, write .desktop entries
+- [ ] Update CI to install GUI build deps once the UI toolkit lands
