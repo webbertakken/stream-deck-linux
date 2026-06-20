@@ -5,6 +5,7 @@
 //! report descriptor, not guessed.
 
 pub mod actions;
+pub mod autostart;
 pub mod config;
 pub mod device;
 pub mod error;
