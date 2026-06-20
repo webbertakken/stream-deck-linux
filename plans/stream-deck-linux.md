@@ -21,20 +21,20 @@ libudev/hidapi system dependency. `image` crate for the picture pipeline.
 ## Tasks
 
 ### Foundation - device library (no hardware needed, TDD)
-- [ ] Scaffold Cargo lib+bin project, `.gitignore`, minimal deps
-- [ ] `protocol`: brightness/reset feature builders (unit tested)
-- [ ] `protocol`: image report packetiser for report `0x02` (unit tested)
-- [ ] `protocol`: parse 15 key states from input report (unit tested)
-- [ ] `model`: MK.2 spec (keys, grid, image size/format/rotation) + key indexing
-- [ ] `image`: load file -> resize 72x72 -> rotate 180 -> JPEG bytes (unit tested)
-- [ ] `hid`: ioctl numbers (`HIDIOCGRAWINFO`/`SFEATURE`/`GFEATURE`) computed + tested
-- [ ] `hid`: RawHidDevice open/enumerate/write/read/feature wrappers
+- [x] Scaffold Cargo lib+bin project, `.gitignore`, minimal deps
+- [x] `protocol`: brightness/reset feature builders (unit tested)
+- [x] `protocol`: image report packetiser for report `0x02` (unit tested)
+- [x] `protocol`: parse 15 key states from input report (unit tested)
+- [x] `model`: MK.2 spec (keys, grid, image size/format/rotation) + key indexing
+- [x] `image`: load file -> resize 72x72 -> rotate 180 -> JPEG bytes (unit tested)
+- [x] `hid`: ioctl numbers (`HIDIOCGRAWINFO`/`SFEATURE`/`GFEATURE`) computed + tested
+- [x] `hid`: RawHidDevice open/enumerate/write/read/feature wrappers
 
 ### Prove against hardware (the real test)
-- [ ] Enumerate + identify the MK.2, print firmware + serial
-- [ ] Set brightness, reset
-- [ ] Push a solid-colour image to a key, then a real picture
-- [ ] Read button press/release events in a loop
+- [x] Enumerate + identify the MK.2, print firmware + serial (fw 1.02.000)
+- [x] Set brightness, reset
+- [x] Push a solid-colour image to a key, then a real picture
+- [x] Read button press/release events in a loop (verified vs raw hidraw)
 
 ### Configuration + action engine
 - [ ] `Button` model: image path + action (run command, etc.)
