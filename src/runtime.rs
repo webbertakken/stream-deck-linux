@@ -1,9 +1,10 @@
 //! Apply a [`Config`] to a device and run the press-to-action loop.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use crate::actions::{Builtin, KeyAction, BRIGHTNESS_STEP};
@@ -116,55 +117,151 @@ fn apply_builtin(deck: &StreamDeck, builtin: Builtin, brightness: &mut u8) -> Re
     Ok(())
 }
 
-/// Render the config and run the press-to-action loop until `shutdown` is set.
-pub fn run(
-    deck: &mut StreamDeck,
-    config: &Config,
-    base_dir: &Path,
-    shutdown: &AtomicBool,
-) -> Result<()> {
-    // Auto-reap launched processes so the daemon never accumulates zombies.
-    unsafe {
-        libc::signal(libc::SIGCHLD, libc::SIG_IGN);
+/// A command sent to the running daemon (e.g. from a tray menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Control {
+    BrightnessUp,
+    BrightnessDown,
+    SetBrightness(u8),
+    Reset,
+    /// Re-read the config file and re-render.
+    Reload,
+    /// Stop the daemon.
+    Quit,
+}
+
+/// Live daemon state: the device plus the rendered config and action map.
+struct Session {
+    deck: StreamDeck,
+    config_path: PathBuf,
+    base_dir: PathBuf,
+    actions: HashMap<u8, KeyAction>,
+    brightness: u8,
+    previous: Vec<bool>,
+}
+
+impl Session {
+    /// Load and render the config onto the device.
+    fn load(mut deck: StreamDeck, config_path: PathBuf) -> Result<Self> {
+        let base_dir = config_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let config = Config::load(&config_path)?;
+        config.validate(deck.model())?;
+        render(&mut deck, &config, &base_dir)?;
+        let actions = action_map(&config)?;
+        let brightness = config.brightness.unwrap_or(DEFAULT_BRIGHTNESS);
+        let previous = vec![false; deck.model().key_count as usize];
+        Ok(Self {
+            deck,
+            config_path,
+            base_dir,
+            actions,
+            brightness,
+            previous,
+        })
     }
 
-    render(deck, config, base_dir)?;
-    let actions = action_map(config)?;
-    let key_count = deck.model().key_count as usize;
-    let mut previous = vec![false; key_count];
-    let mut brightness = config.brightness.unwrap_or(DEFAULT_BRIGHTNESS);
+    /// Re-read the config from disk and re-render.
+    fn reload(&mut self) -> Result<()> {
+        let config = Config::load(&self.config_path)?;
+        config.validate(self.deck.model())?;
+        render(&mut self.deck, &config, &self.base_dir)?;
+        self.actions = action_map(&config)?;
+        if let Some(brightness) = config.brightness {
+            self.brightness = brightness;
+        }
+        println!("config reloaded ({} action(s))", self.actions.len());
+        Ok(())
+    }
 
-    println!(
-        "Running with {} mapped action(s). Press Ctrl-C to stop.",
-        actions.len()
-    );
+    /// Apply a control command. `Quit` is handled by the caller.
+    fn handle_control(&mut self, control: Control) -> Result<()> {
+        match control {
+            Control::BrightnessUp => {
+                apply_builtin(&self.deck, Builtin::BrightnessUp, &mut self.brightness)
+            }
+            Control::BrightnessDown => {
+                apply_builtin(&self.deck, Builtin::BrightnessDown, &mut self.brightness)
+            }
+            Control::SetBrightness(value) => apply_builtin(
+                &self.deck,
+                Builtin::BrightnessSet(value),
+                &mut self.brightness,
+            ),
+            Control::Reset => apply_builtin(&self.deck, Builtin::Reset, &mut self.brightness),
+            Control::Reload => self.reload(),
+            Control::Quit => Ok(()),
+        }
+    }
 
-    while !shutdown.load(Ordering::Relaxed) {
-        let Some(states) = deck.read_button_states(Some(POLL_INTERVAL))? else {
-            continue;
+    /// Poll the device once and dispatch any key presses.
+    fn poll(&mut self) -> Result<()> {
+        let Some(states) = self.deck.read_button_states(Some(POLL_INTERVAL))? else {
+            return Ok(());
         };
-        for event in diff_states(&previous, &states) {
+        let events = diff_states(&self.previous, &states);
+        self.previous = states;
+        for event in events {
             if event.kind != KeyEventKind::Pressed {
                 continue;
             }
-            match actions.get(&event.key) {
+            // Clone the action out so the borrow of `self.actions` is released
+            // before we mutate other fields.
+            match self.actions.get(&event.key).cloned() {
                 Some(KeyAction::Run(command)) => {
                     println!("key {} pressed -> {command}", event.key);
-                    if let Err(err) = spawn(command) {
+                    if let Err(err) = spawn(&command) {
                         eprintln!("error: failed to run '{command}': {err}");
                     }
                 }
                 Some(KeyAction::Builtin(builtin)) => {
                     println!("key {} pressed -> builtin {builtin:?}", event.key);
-                    if let Err(err) = apply_builtin(deck, *builtin, &mut brightness) {
+                    if let Err(err) = apply_builtin(&self.deck, builtin, &mut self.brightness) {
                         eprintln!("error: builtin {builtin:?} failed: {err}");
                     }
                 }
                 None => {}
             }
         }
-        previous = states;
+        Ok(())
     }
+}
+
+/// Render the config and run the press-to-action loop, also servicing control
+/// messages, until `shutdown` is set or a `Quit` arrives.
+pub fn run_with_control(
+    deck: StreamDeck,
+    config_path: PathBuf,
+    shutdown: &AtomicBool,
+    control: &Receiver<Control>,
+) -> Result<()> {
+    // Auto-reap launched processes so the daemon never accumulates zombies.
+    unsafe {
+        libc::signal(libc::SIGCHLD, libc::SIG_IGN);
+    }
+
+    let mut session = Session::load(deck, config_path)?;
+    println!("Running with {} mapped action(s).", session.actions.len());
+
+    while !shutdown.load(Ordering::Relaxed) {
+        while let Ok(control) = control.try_recv() {
+            if control == Control::Quit {
+                shutdown.store(true, Ordering::Relaxed);
+                break;
+            }
+            if let Err(err) = session.handle_control(control) {
+                eprintln!("error: control {control:?} failed: {err}");
+            }
+        }
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+        session.poll()?;
+    }
+
+    let _ = session.deck.clear_all();
     Ok(())
 }
 

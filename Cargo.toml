@@ -21,6 +21,7 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 ab_glyph = "0.2"
+ksni = { version = "0.3", features = ["blocking"] }
 
 [profile.release]
 opt-level = 3

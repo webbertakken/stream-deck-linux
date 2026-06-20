@@ -1,12 +1,14 @@
 //! `streamdeck` - command-line control for Elgato Stream Deck on Linux.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use streamdeck::events::diff_states;
-use streamdeck::{runtime, Config, Error, StreamDeck};
+use streamdeck::tray::StreamDeckTray;
+use streamdeck::{autostart, runtime, Error, StreamDeck};
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -23,6 +25,8 @@ fn main() -> ExitCode {
         "clear" => cmd_clear(&args),
         "reset" => cmd_reset(),
         "run" => cmd_run(&args),
+        "tray" => cmd_tray(&args),
+        "autostart" => cmd_autostart(&args),
         "watch" => cmd_watch(&args),
         "help" | "-h" | "--help" => {
             print_help();
@@ -152,31 +156,103 @@ fn cmd_reset() -> Result<(), Error> {
 
 fn cmd_run(args: &[String]) -> Result<(), Error> {
     let config_path = config_path(args);
-    let base_dir = config_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    let config = Config::load(&config_path).inspect_err(|_| {
-        eprintln!("error: could not load config {}", config_path.display());
-    })?;
-
-    let mut deck = StreamDeck::open_first()?;
-    config.validate(deck.model())?;
-    install_signal_handlers();
-
+    let deck = StreamDeck::open_first()?;
     println!(
         "Loaded {} from {}.",
         deck.model().name,
         config_path.display()
     );
-    let result = runtime::run(&mut deck, &config, &base_dir, &SHUTDOWN);
+    install_signal_handlers();
 
-    // Leave the deck blank on a clean shutdown so stale icons do not linger.
-    let _ = deck.clear_all();
+    let (_tx, rx) = mpsc::channel();
+    let result = runtime::run_with_control(deck, config_path, &SHUTDOWN, &rx);
     println!("\nStopped.");
     result
 }
+
+fn cmd_tray(args: &[String]) -> Result<(), Error> {
+    let config_path = config_path(args);
+    ensure_config_exists(&config_path)?;
+
+    let deck = StreamDeck::open_first()?;
+    let status = format!("{} connected", deck.model().name);
+    println!("Tray starting for {}.", deck.model().name);
+    install_signal_handlers();
+
+    let (tx, rx) = mpsc::channel::<runtime::Control>();
+
+    // Device daemon runs in the background; the tray owns the main thread.
+    let daemon_path = config_path.clone();
+    let daemon = std::thread::spawn(move || {
+        if let Err(err) = runtime::run_with_control(deck, daemon_path, &SHUTDOWN, &rx) {
+            eprintln!("error: daemon stopped: {err}");
+        }
+        SHUTDOWN.store(true, Ordering::Relaxed);
+    });
+
+    let tray = StreamDeckTray::new(tx, &SHUTDOWN, config_path, status);
+    let _handle = tray.show()?;
+    println!("Tray running. Use the tray menu (or Ctrl-C) to quit.");
+
+    while !SHUTDOWN.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let _ = daemon.join();
+    println!("\nStopped.");
+    Ok(())
+}
+
+fn cmd_autostart(args: &[String]) -> Result<(), Error> {
+    let action = args.get(1).map(String::as_str).unwrap_or("status");
+    match action {
+        "enable" => {
+            let exe = std::env::current_exe()?;
+            let exec = format!("{} tray", exe.display());
+            let path = autostart::enable(&exec, "streamdeck")?;
+            println!("Autostart enabled: {}", path.display());
+            println!("Exec: {exec}");
+        }
+        "disable" => {
+            if autostart::disable()? {
+                println!("Autostart disabled.");
+            } else {
+                println!("Autostart was not enabled.");
+            }
+        }
+        "status" => {
+            let state = if autostart::is_enabled() {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            println!("Autostart: {state}");
+            println!("Entry: {}", autostart::entry_path().display());
+        }
+        other => {
+            eprintln!("unknown autostart action: {other}");
+            usage_exit("autostart enable|disable|status");
+        }
+    }
+    Ok(())
+}
+
+/// Write a friendly starter config if none exists yet.
+fn ensure_config_exists(path: &PathBuf) -> Result<(), Error> {
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, STARTER_CONFIG)?;
+    println!("Wrote a starter config to {}.", path.display());
+    Ok(())
+}
+
+const STARTER_CONFIG: &str = "brightness = 60\n\n\
+[[buttons]]\nkey = 0\ncolor = \"#1e1e2e\"\nlabel = \"Term\"\nrun = \"x-terminal-emulator\"\n\n\
+[[buttons]]\nkey = 5\ncolor = \"#444466\"\nlabel = \"Bright+\"\nbuiltin = \"brightness_up\"\n\n\
+[[buttons]]\nkey = 10\ncolor = \"#222244\"\nlabel = \"Bright-\"\nbuiltin = \"brightness_down\"\n";
 
 /// Resolve the config path from `run [path]`, defaulting to the XDG location.
 fn config_path(args: &[String]) -> PathBuf {
@@ -267,6 +343,8 @@ fn print_help() {
          \x20 clear [key]              blank one key, or all keys\n\
          \x20 reset                    return device to standby logo\n\
          \x20 run [config.toml]        render config and dispatch key actions\n\
+         \x20 tray [config.toml]       run in the system tray with a daemon\n\
+         \x20 autostart <enable|disable|status>  manage login autostart\n\
          \x20 watch [seconds]          print button press/release events"
     );
 }

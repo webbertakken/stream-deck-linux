@@ -31,4 +31,8 @@ pub enum Error {
     /// Config file is structurally valid but semantically wrong.
     #[error("invalid config: {0}")]
     ConfigInvalid(String),
+
+    /// System tray (StatusNotifierItem) error.
+    #[error("tray error: {0}")]
+    Tray(String),
 }

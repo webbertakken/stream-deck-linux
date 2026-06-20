@@ -16,6 +16,7 @@ pub mod model;
 pub mod protocol;
 pub mod render;
 pub mod runtime;
+pub mod tray;
 
 pub use config::{ButtonConfig, Config};
 pub use device::StreamDeck;
