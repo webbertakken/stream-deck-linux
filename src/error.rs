@@ -23,4 +23,12 @@ pub enum Error {
     /// Image decoding/encoding error.
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
+
+    /// Config file could not be parsed.
+    #[error("config parse error: {0}")]
+    ConfigParse(#[from] toml::de::Error),
+
+    /// Config file is structurally valid but semantically wrong.
+    #[error("invalid config: {0}")]
+    ConfigInvalid(String),
 }

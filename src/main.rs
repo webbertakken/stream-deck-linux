@@ -1,10 +1,14 @@
 //! `streamdeck` - command-line control for Elgato Stream Deck on Linux.
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use streamdeck::events::diff_states;
-use streamdeck::{Error, StreamDeck};
+use streamdeck::{runtime, Config, Error, StreamDeck};
+
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -18,6 +22,7 @@ fn main() -> ExitCode {
         "image" => cmd_image(&args),
         "clear" => cmd_clear(&args),
         "reset" => cmd_reset(),
+        "run" => cmd_run(&args),
         "watch" => cmd_watch(&args),
         "help" | "-h" | "--help" => {
             print_help();
@@ -145,6 +150,58 @@ fn cmd_reset() -> Result<(), Error> {
     Ok(())
 }
 
+fn cmd_run(args: &[String]) -> Result<(), Error> {
+    let config_path = config_path(args);
+    let base_dir = config_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let config = Config::load(&config_path).inspect_err(|_| {
+        eprintln!("error: could not load config {}", config_path.display());
+    })?;
+
+    let mut deck = StreamDeck::open_first()?;
+    config.validate(deck.model())?;
+    install_signal_handlers();
+
+    println!(
+        "Loaded {} from {}.",
+        deck.model().name,
+        config_path.display()
+    );
+    let result = runtime::run(&mut deck, &config, &base_dir, &SHUTDOWN);
+
+    // Leave the deck blank on a clean shutdown so stale icons do not linger.
+    let _ = deck.clear_all();
+    println!("\nStopped.");
+    result
+}
+
+/// Resolve the config path from `run [path]`, defaulting to the XDG location.
+fn config_path(args: &[String]) -> PathBuf {
+    if let Some(path) = args.get(1) {
+        return PathBuf::from(path);
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join("streamdeck").join("config.toml")
+}
+
+extern "C" fn handle_signal(_sig: libc::c_int) {
+    SHUTDOWN.store(true, Ordering::Relaxed);
+}
+
+fn install_signal_handlers() {
+    let handler = handle_signal as *const () as libc::sighandler_t;
+    unsafe {
+        libc::signal(libc::SIGINT, handler);
+        libc::signal(libc::SIGTERM, handler);
+    }
+}
+
 fn cmd_watch(args: &[String]) -> Result<(), Error> {
     let seconds = args.get(1).and_then(|s| s.parse::<u64>().ok());
     let mut deck = StreamDeck::open_first()?;
@@ -209,6 +266,7 @@ fn print_help() {
          \x20 image <key> <path>       render a picture onto a key\n\
          \x20 clear [key]              blank one key, or all keys\n\
          \x20 reset                    return device to standby logo\n\
+         \x20 run [config.toml]        render config and dispatch key actions\n\
          \x20 watch [seconds]          print button press/release events"
     );
 }

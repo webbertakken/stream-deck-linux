@@ -118,6 +118,10 @@ impl RawHidDevice {
     }
 
     /// Read an input report. With a timeout, returns `Ok(0)` if none arrived.
+    ///
+    /// A signal interrupting the wait (`EINTR`) is reported as `Ok(0)` rather
+    /// than an error, so a poll loop can re-check a shutdown flag and exit
+    /// cleanly on Ctrl-C.
     pub fn read_timeout(&mut self, buf: &mut [u8], timeout: Option<Duration>) -> io::Result<usize> {
         if let Some(timeout) = timeout {
             let mut pfd = libc::pollfd {
@@ -128,13 +132,21 @@ impl RawHidDevice {
             let ms = timeout.as_millis().min(i32::MAX as u128) as i32;
             let rc = unsafe { libc::poll(&mut pfd, 1, ms) };
             if rc < 0 {
-                return Err(io::Error::last_os_error());
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    return Ok(0);
+                }
+                return Err(err);
             }
             if rc == 0 {
                 return Ok(0);
             }
         }
-        self.file.read(buf)
+        match self.file.read(buf) {
+            Ok(n) => Ok(n),
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => Ok(0),
+            Err(err) => Err(err),
+        }
     }
 }
 

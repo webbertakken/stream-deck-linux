@@ -1,0 +1,36 @@
+# Demo Stream Deck layout. Run with:
+#   streamdeck run examples/demo-config.toml
+#
+# Relative image paths resolve against this file's directory; `~` expands to
+# $HOME. The `run` command is executed (via `sh -c`) when the key is pressed.
+
+brightness = 70
+
+[[buttons]]
+key = 0
+color = "#1e1e2e"
+run = "touch /tmp/streamdeck_key0"
+
+[[buttons]]
+key = 2
+image = "/usr/share/icons/Yaru-prussiangreen/256x256@2x/places/folder-music.png"
+run = "touch /tmp/streamdeck_key2"
+
+[[buttons]]
+key = 4
+color = "#cc2222"
+run = "touch /tmp/streamdeck_key4"
+
+[[buttons]]
+key = 7
+color = "#2277cc"
+
+[[buttons]]
+key = 12
+color = "#22aa55"
+run = "touch /tmp/streamdeck_key12"
+
+[[buttons]]
+key = 14
+color = "#aa22aa"
+run = "touch /tmp/streamdeck_key14"

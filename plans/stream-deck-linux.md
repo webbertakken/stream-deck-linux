@@ -37,10 +37,13 @@ libudev/hidapi system dependency. `image` crate for the picture pipeline.
 - [x] Read button press/release events in a loop (verified vs raw hidraw)
 
 ### Configuration + action engine
-- [ ] `Button` model: image path + action (run command, etc.)
-- [ ] Config file format (per-key image + function) + loader
-- [ ] Event loop: on key press -> run mapped action
-- [ ] Render all configured images on startup; brightness from config
+- [x] `Button` model: image path + action (run command, etc.)
+- [x] Config file format (per-key image + function) + loader (TOML)
+- [x] Event loop: on key press -> run mapped action (proven on hardware)
+- [x] Render all configured images on startup; brightness from config
+- [x] Graceful shutdown clears deck, EINTR-safe (clean exit 0 on Ctrl-C)
+- [ ] Built-in actions (deck brightness up/down, reset) alongside `run`
+- [ ] On-key text labels (bundled font, rendered onto keys)
 
 ### Daemon + ergonomics
 - [ ] `streamdeckd` long-running daemon, graceful reset on exit
