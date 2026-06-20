@@ -5,6 +5,8 @@
 //! report descriptor, not guessed.
 
 pub mod error;
+pub mod image;
+pub mod model;
 pub mod protocol;
 
 pub use error::{Error, Result};
