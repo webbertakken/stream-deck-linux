@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Stream Deck editor</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1 class="topbar__title">
+        <span class="dot" aria-hidden="true"></span>
+        Stream Deck <span id="model" class="topbar__model"></span>
+      </h1>
+      <div class="topbar__controls">
+        <label class="bright" for="brightness">
+          Brightness
+          <input id="brightness" type="range" min="0" max="100" step="5" value="60" />
+          <output id="brightnessOut" for="brightness">60%</output>
+        </label>
+        <button id="save" class="btn btn--primary" type="button">Save &amp; apply</button>
+      </div>
+    </header>
+
+    <p id="status" class="status" role="status" aria-live="polite">&nbsp;</p>
+
+    <main class="layout">
+      <section class="grid-wrap" aria-label="Keys">
+        <div id="grid" class="grid"></div>
+      </section>
+
+      <aside class="panel" aria-label="Key editor">
+        <h2 class="panel__title">Key <span id="selKey">-</span></h2>
+
+        <form id="form" class="form" autocomplete="off">
+          <div class="field">
+            <label for="label">Label</label>
+            <input id="label" type="text" maxlength="24" placeholder="(none)" />
+          </div>
+
+          <div class="field field--row">
+            <label class="check">
+              <input id="useText" type="checkbox" /> Text colour
+            </label>
+            <input id="textColor" type="color" value="#ffffff" aria-label="Text colour" />
+          </div>
+
+          <div class="field field--row">
+            <label class="check">
+              <input id="useColor" type="checkbox" /> Background colour
+            </label>
+            <input id="color" type="color" value="#1e1e2e" aria-label="Background colour" />
+          </div>
+
+          <div class="field">
+            <label for="image">Image path</label>
+            <input id="image" type="text" placeholder="/path/to/icon.png or ~/pics/x.png" />
+          </div>
+
+          <fieldset class="field action">
+            <legend>Action</legend>
+            <label class="radio"><input type="radio" name="act" value="none" /> None</label>
+            <label class="radio"><input type="radio" name="act" value="run" /> Run command</label>
+            <label class="radio"><input type="radio" name="act" value="builtin" /> Built-in</label>
+
+            <input id="run" type="text" placeholder="e.g. alacritty" hidden />
+            <div id="builtinRow" hidden>
+              <select id="builtin" aria-label="Built-in action">
+                <option value="brightness_up">Brightness +</option>
+                <option value="brightness_down">Brightness -</option>
+                <option value="brightness_set">Set brightness…</option>
+                <option value="reset">Reset device</option>
+              </select>
+              <input id="builtinValue" type="number" min="0" max="100" value="70" hidden aria-label="Brightness value" />
+            </div>
+          </fieldset>
+
+          <div class="form__actions">
+            <button id="clearKey" class="btn" type="button">Clear key</button>
+          </div>
+        </form>
+      </aside>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

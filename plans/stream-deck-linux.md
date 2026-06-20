@@ -63,7 +63,8 @@ Desktop verified: Linux Mint 22.3 Cinnamon, X11. SNI tray host present
       thread + tray on the main thread; actions via a control channel
 - [ ] Autostart on login: install/remove `~/.config/autostart/streamdeck.desktop`
       (`streamdeck autostart enable|disable|status`)
-- [ ] Config editor UI: 5x3 key grid; click a key to set image/colour/label/
-      action; live-apply to device + save TOML (toolkit pending decision)
+- [x] Config editor UI: 5x3 key grid; click a key to set image/colour/label/
+      action; live-apply to device + save TOML (chose local web UI - see
+      DECISIONS.md; verified via curl API + headless Chrome screenshot)
 - [ ] `streamdeck install` helper: copy icon to hicolor, write .desktop entries
-- [ ] Update CI to install GUI build deps once the UI toolkit lands
+- [x] CI needs no GUI deps (web UI + ksni are pure-Rust, no system libs)

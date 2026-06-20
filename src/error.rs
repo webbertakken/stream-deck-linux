@@ -35,4 +35,8 @@ pub enum Error {
     /// System tray (StatusNotifierItem) error.
     #[error("tray error: {0}")]
     Tray(String),
+
+    /// Web UI server error.
+    #[error("web ui error: {0}")]
+    Web(String),
 }

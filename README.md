@@ -18,8 +18,10 @@ HID report descriptor, not guessed.
 - Per-key **functions**: run a shell command, or a device **built-in**
   (brightness up/down/set, reset).
 - A single **TOML config** describes the whole layout.
-- A long-running `run` mode renders the layout and dispatches actions on press,
-  with a graceful, deck-clearing shutdown on Ctrl-C.
+- A **system tray** (StatusNotifierItem) with quick actions and a daemon.
+- A **web-based editor**: click the 5x3 grid, set each key's picture and
+  action, and changes apply to the device live.
+- **Autostart on login** via a freedesktop `.desktop` entry.
 - A handful of one-shot CLI commands for quick tweaks and scripting.
 
 ## Hardware support
@@ -72,6 +74,31 @@ streamdeck run examples/demo-config.toml   # render layout + dispatch actions
 
 `run` with no path looks at `$XDG_CONFIG_HOME/streamdeck/config.toml`
 (usually `~/.config/streamdeck/config.toml`).
+
+## Desktop app: tray, editor and autostart
+
+```bash
+streamdeck tray            # run the daemon with a system-tray icon + web editor
+streamdeck ui              # open the web editor (and run the daemon)
+streamdeck autostart enable   # start `streamdeck tray` on login
+streamdeck autostart status
+streamdeck autostart disable
+```
+
+- **Tray menu**: open editor, reload config, brightness +/-, reset device, quit.
+  The tray uses a pure-Rust StatusNotifierItem implementation (no GTK) and the
+  embedded app icon, so it works on KDE, GNOME (with an SNI extension),
+  Cinnamon/XApp and other SNI hosts.
+- **Web editor**: served locally (e.g. `http://127.0.0.1:NNNNN`). Pick a key to
+  set its label, text colour, background colour, image path and action (run
+  command or built-in). Each tile previews exactly what the device shows.
+  Saving writes the TOML and re-renders the device immediately.
+- **Autostart**: writes `~/.config/autostart/streamdeck.desktop` pointing at the
+  current binary's `tray` mode. A first run creates a starter config if none
+  exists.
+
+The generated icons live in `assets/icons/`
+(`cargo run --example gen-icon` regenerates them).
 
 ## Config reference
 
@@ -132,7 +159,9 @@ or `ydotool key 29:1 46:1 46:0 29:0`.
   with centred text.
 - `device` - the high-level `StreamDeck` API.
 - `config` / `actions` / `runtime` - the TOML layout, action model, and the
-  render + press-to-action loop.
+  control-aware render + press-to-action daemon loop.
+- `tray` / `webui` / `autostart` - the desktop integration: a `ksni` tray, an
+  in-process `tiny_http` editor, and login autostart.
 
 ## Development
 

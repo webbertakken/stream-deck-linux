@@ -1,14 +1,23 @@
 //! Compose a key's visual: a background (image or colour) with an optional
 //! centred text label, then encode it for upload.
 
+use std::io::Cursor;
+use std::path::Path;
 use std::sync::OnceLock;
 
 use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, Rgb, RgbImage};
 
+use crate::config::ButtonConfig;
 use crate::error::Result;
 use crate::image as key_image;
 use crate::model::ImageSpec;
+
+/// Colour shown on a key whose image failed to load and that has no colour
+/// fallback, so a broken tile is loud rather than silent.
+pub const ERROR_TILE: [u8; 3] = [255, 0, 255];
+/// Default label colour when none is configured.
+pub const DEFAULT_TEXT_COLOR: [u8; 3] = [255, 255, 255];
 
 /// Bundled fallback font (SIL OFL 1.1, see `assets/LiberationSans-LICENSE.txt`).
 const FONT_BYTES: &[u8] = include_bytes!("../assets/LiberationSans-Regular.ttf");
@@ -75,6 +84,59 @@ impl KeySurface {
         let oriented = key_image::orient(&self.spec, self.canvas.clone());
         key_image::encode_rgb(&self.spec, &oriented)
     }
+}
+
+/// Compose a key's visual from its config: background (image or colour) plus
+/// an optional centred label. Image-load failures are reported and fall back
+/// to the colour, or an error tile, never a silent blank.
+pub fn compose(spec: &ImageSpec, base_dir: &Path, button: &ButtonConfig) -> KeySurface {
+    let mut surface = KeySurface::new(spec);
+
+    let drew_image = match button.resolved_image(base_dir) {
+        Some(path) => match image::open(&path) {
+            Ok(picture) => {
+                surface.draw_image(&picture);
+                true
+            }
+            Err(err) => {
+                eprintln!(
+                    "warning: key {} image '{}' failed to load: {err}",
+                    button.key,
+                    path.display()
+                );
+                false
+            }
+        },
+        None => false,
+    };
+
+    if !drew_image {
+        match button.rgb() {
+            Ok(Some(rgb)) => surface.fill(rgb),
+            Ok(None) if button.label.is_some() => {} // keep black background
+            _ => surface.fill(ERROR_TILE),
+        }
+    }
+
+    if let Some(label) = &button.label {
+        let color = button
+            .text_rgb()
+            .ok()
+            .flatten()
+            .unwrap_or(DEFAULT_TEXT_COLOR);
+        surface.draw_text_centered(label, color);
+    }
+
+    surface
+}
+
+/// Compose a key and encode it as a PNG (upright) for previews.
+pub fn button_png(spec: &ImageSpec, base_dir: &Path, button: &ButtonConfig) -> Result<Vec<u8>> {
+    let surface = compose(spec, base_dir, button);
+    let mut buffer = Vec::new();
+    DynamicImage::ImageRgb8(surface.canvas().clone())
+        .write_to(&mut Cursor::new(&mut buffer), image::ImageFormat::Png)?;
+    Ok(buffer)
 }
 
 /// Width in pixels of `text` rendered at `px` with the given font.

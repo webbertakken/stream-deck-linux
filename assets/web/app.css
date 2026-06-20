@@ -1,0 +1,255 @@
+:root {
+  --bg: #15151b;
+  --bg-elev: #1e1e28;
+  --bg-input: #12121a;
+  --line: #33333f;
+  --text: #f0f0f4;
+  --muted: #a6a6b4;
+  --accent: #6ea8ff;
+  --accent-ink: #07101f;
+  --danger: #ff6b8a;
+  --focus: #ffd166;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar__title {
+  font-size: 18px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar__model {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.topbar__controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.bright {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.bright input[type="range"] {
+  width: 160px;
+  accent-color: var(--accent);
+}
+
+.bright output {
+  min-width: 3ch;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  margin: 0;
+  padding: 6px 20px;
+  min-height: 28px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.status[data-kind="ok"] {
+  color: #7fe0a8;
+}
+.status[data-kind="err"] {
+  color: var(--danger);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  padding: 24px;
+  align-items: start;
+}
+
+.grid-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(var(--cols, 5), 96px);
+}
+
+.key {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: #000 center / cover no-repeat;
+  cursor: pointer;
+  color: #fff;
+  overflow: hidden;
+}
+
+.key:hover {
+  border-color: var(--muted);
+}
+
+.key[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.key__idx {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 0 1px 2px #000, 0 0 3px #000;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+
+.panel__title {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field label,
+.check,
+.radio,
+legend {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+input[type="text"],
+input[type="number"],
+select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+input[type="color"] {
+  width: 44px;
+  height: 30px;
+  padding: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.action {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio,
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.form__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.btn:hover {
+  border-color: var(--muted);
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}

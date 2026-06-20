@@ -3,12 +3,15 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, Sender};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use streamdeck::events::diff_states;
+use streamdeck::runtime::Control;
 use streamdeck::tray::StreamDeckTray;
-use streamdeck::{autostart, runtime, Error, StreamDeck};
+use streamdeck::webui::WebUi;
+use streamdeck::{autostart, runtime, Error, Model, StreamDeck};
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -26,6 +29,7 @@ fn main() -> ExitCode {
         "reset" => cmd_reset(),
         "run" => cmd_run(&args),
         "tray" => cmd_tray(&args),
+        "ui" => cmd_ui(&args),
         "autostart" => cmd_autostart(&args),
         "watch" => cmd_watch(&args),
         "help" | "-h" | "--help" => {
@@ -170,27 +174,47 @@ fn cmd_run(args: &[String]) -> Result<(), Error> {
     result
 }
 
-fn cmd_tray(args: &[String]) -> Result<(), Error> {
-    let config_path = config_path(args);
-    ensure_config_exists(&config_path)?;
-
+/// Open the device and run the press-to-action daemon in a background thread.
+fn start_daemon(config_path: PathBuf) -> Result<(Model, Sender<Control>, JoinHandle<()>), Error> {
     let deck = StreamDeck::open_first()?;
-    let status = format!("{} connected", deck.model().name);
-    println!("Tray starting for {}.", deck.model().name);
-    install_signal_handlers();
-
-    let (tx, rx) = mpsc::channel::<runtime::Control>();
-
-    // Device daemon runs in the background; the tray owns the main thread.
-    let daemon_path = config_path.clone();
-    let daemon = std::thread::spawn(move || {
+    let model = *deck.model();
+    let (tx, rx) = mpsc::channel::<Control>();
+    let daemon_path = config_path;
+    let handle = std::thread::spawn(move || {
         if let Err(err) = runtime::run_with_control(deck, daemon_path, &SHUTDOWN, &rx) {
             eprintln!("error: daemon stopped: {err}");
         }
         SHUTDOWN.store(true, Ordering::Relaxed);
     });
+    Ok((model, tx, handle))
+}
 
-    let tray = StreamDeckTray::new(tx, &SHUTDOWN, config_path, status);
+/// Start the in-process web editor server on an ephemeral local port.
+fn start_web_ui(
+    model: Model,
+    config_path: PathBuf,
+    control: Sender<Control>,
+) -> Result<(String, JoinHandle<()>), Error> {
+    let web = WebUi::bind("127.0.0.1:0", model, config_path, control)?;
+    let url = web.url();
+    let handle = std::thread::spawn(move || {
+        if let Err(err) = web.serve(&SHUTDOWN) {
+            eprintln!("error: web ui stopped: {err}");
+        }
+    });
+    Ok((url, handle))
+}
+
+fn cmd_tray(args: &[String]) -> Result<(), Error> {
+    let config_path = config_path(args);
+    ensure_config_exists(&config_path)?;
+    install_signal_handlers();
+
+    let (model, tx, daemon) = start_daemon(config_path.clone())?;
+    let (url, web) = start_web_ui(model, config_path, tx.clone())?;
+    println!("Tray starting for {}. Editor at {url}", model.name);
+
+    let tray = StreamDeckTray::new(tx, &SHUTDOWN, url, format!("{} connected", model.name));
     let _handle = tray.show()?;
     println!("Tray running. Use the tray menu (or Ctrl-C) to quit.");
 
@@ -198,8 +222,37 @@ fn cmd_tray(args: &[String]) -> Result<(), Error> {
         std::thread::sleep(Duration::from_millis(200));
     }
     let _ = daemon.join();
+    let _ = web.join();
     println!("\nStopped.");
     Ok(())
+}
+
+fn cmd_ui(args: &[String]) -> Result<(), Error> {
+    let config_path = config_path(args);
+    ensure_config_exists(&config_path)?;
+    install_signal_handlers();
+
+    let (model, tx, daemon) = start_daemon(config_path.clone())?;
+    let web = WebUi::bind("127.0.0.1:0", model, config_path, tx)?;
+    let url = web.url();
+    println!("Editor for {} at {url}", model.name);
+    open_in_browser(&url);
+
+    let result = web.serve(&SHUTDOWN);
+    SHUTDOWN.store(true, Ordering::Relaxed);
+    let _ = daemon.join();
+    println!("\nStopped.");
+    result
+}
+
+/// Open a URL in the default browser unless suppressed (e.g. in tests).
+fn open_in_browser(url: &str) {
+    if std::env::var_os("STREAMDECK_NO_BROWSER").is_some() {
+        return;
+    }
+    if let Err(err) = std::process::Command::new("xdg-open").arg(url).spawn() {
+        eprintln!("note: could not open browser ({err}); visit {url}");
+    }
 }
 
 fn cmd_autostart(args: &[String]) -> Result<(), Error> {
@@ -344,6 +397,7 @@ fn print_help() {
          \x20 reset                    return device to standby logo\n\
          \x20 run [config.toml]        render config and dispatch key actions\n\
          \x20 tray [config.toml]       run in the system tray with a daemon\n\
+         \x20 ui [config.toml]         open the web editor + run the daemon\n\
          \x20 autostart <enable|disable|status>  manage login autostart\n\
          \x20 watch [seconds]          print button press/release events"
     );

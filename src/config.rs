@@ -18,48 +18,49 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::Builtin;
 use crate::error::{Error, Result};
 use crate::model::Model;
 
 /// A full Stream Deck layout: optional brightness plus per-key buttons.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Display brightness percentage to apply on load (`0..=100`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub brightness: Option<u8>,
     /// Per-key configuration.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub buttons: Vec<ButtonConfig>,
 }
 
 /// One key's picture and function.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ButtonConfig {
     /// Hardware key index.
     pub key: u8,
     /// Picture file to render onto the key (relative paths resolve against the
     /// config file's directory; `~` expands to `$HOME`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<PathBuf>,
     /// Solid colour fallback as `#RRGGBB` or `RRGGBB`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// Shell command to run when the key is pressed.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<String>,
     /// Built-in action to trigger when the key is pressed (e.g.
     /// `brightness_up`, `brightness_down`, `brightness_set:70`, `reset`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builtin: Option<String>,
     /// Optional text label drawn centred on the key.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// Colour of the label text as `#RRGGBB` (defaults to white).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_color: Option<String>,
 }
 
@@ -73,6 +74,11 @@ impl Config {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let contents = std::fs::read_to_string(path)?;
         Self::from_toml_str(&contents)
+    }
+
+    /// Serialise the config back to a TOML string.
+    pub fn to_toml_string(&self) -> Result<String> {
+        toml::to_string_pretty(self).map_err(|err| Error::ConfigInvalid(err.to_string()))
     }
 
     /// Validate the config against a model: keys in range, no duplicates,
@@ -202,6 +208,16 @@ key = 4
 color = "#1e1e2e"
 run = "amixer set Master toggle"
 "##;
+
+    #[test]
+    fn toml_round_trips() {
+        let config = Config::from_toml_str(SAMPLE).unwrap();
+        let serialised = config.to_toml_string().unwrap();
+        let reparsed = Config::from_toml_str(&serialised).unwrap();
+        assert_eq!(config, reparsed);
+        // None fields must not be emitted as empty keys.
+        assert!(!serialised.contains("image = \"\""));
+    }
 
     #[test]
     fn parses_brightness_and_buttons() {

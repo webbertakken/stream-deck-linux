@@ -3,7 +3,6 @@
 //! The tray runs on the main thread; menu actions hand work to the device
 //! daemon over a channel (never block in a menu callback).
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
@@ -20,7 +19,7 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/icons/streamdeck-64.png");
 pub struct StreamDeckTray {
     control: Sender<Control>,
     shutdown: &'static AtomicBool,
-    config_path: PathBuf,
+    editor_url: String,
     status: String,
 }
 
@@ -28,13 +27,13 @@ impl StreamDeckTray {
     pub fn new(
         control: Sender<Control>,
         shutdown: &'static AtomicBool,
-        config_path: PathBuf,
+        editor_url: String,
         status: String,
     ) -> Self {
         Self {
             control,
             shutdown,
-            config_path,
+            editor_url,
             status,
         }
     }
@@ -69,10 +68,10 @@ fn app_icon() -> Icon {
     }
 }
 
-/// Open the config file in the user's default handler.
-fn open_config(path: &PathBuf) {
-    if let Err(err) = std::process::Command::new("xdg-open").arg(path).spawn() {
-        eprintln!("error: could not open {}: {err}", path.display());
+/// Open a URL in the user's default browser.
+fn open_url(url: &str) {
+    if let Err(err) = std::process::Command::new("xdg-open").arg(url).spawn() {
+        eprintln!("error: could not open {url}: {err}");
     }
 }
 
@@ -99,8 +98,8 @@ impl Tray for StreamDeckTray {
             .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "Edit config".into(),
-                activate: Box::new(|this: &mut Self| open_config(&this.config_path)),
+                label: "Open editor".into(),
+                activate: Box::new(|this: &mut Self| open_url(&this.editor_url)),
                 ..Default::default()
             }
             .into(),
