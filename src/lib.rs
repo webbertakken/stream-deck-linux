@@ -4,6 +4,7 @@
 //! dependency). The protocol constants are grounded in the device's own HID
 //! report descriptor, not guessed.
 
+pub mod actions;
 pub mod config;
 pub mod device;
 pub mod error;

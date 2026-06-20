@@ -14,6 +14,24 @@ label = "Term"
 run = "touch /tmp/streamdeck_key0"
 
 [[buttons]]
+key = 5
+color = "#444466"
+label = "Bright+"
+builtin = "brightness_up"
+
+[[buttons]]
+key = 10
+color = "#222244"
+label = "Bright-"
+builtin = "brightness_down"
+
+[[buttons]]
+key = 11
+color = "#553333"
+label = "Reset"
+builtin = "reset"
+
+[[buttons]]
 key = 2
 image = "/usr/share/icons/Yaru-prussiangreen/256x256@2x/places/folder-music.png"
 run = "touch /tmp/streamdeck_key2"

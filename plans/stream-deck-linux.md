@@ -42,8 +42,8 @@ libudev/hidapi system dependency. `image` crate for the picture pipeline.
 - [x] Event loop: on key press -> run mapped action (proven on hardware)
 - [x] Render all configured images on startup; brightness from config
 - [x] Graceful shutdown clears deck, EINTR-safe (clean exit 0 on Ctrl-C)
-- [ ] Built-in actions (deck brightness up/down, reset) alongside `run`
-- [ ] On-key text labels (bundled font, rendered onto keys)
+- [x] Built-in actions (deck brightness up/down/set, reset) alongside `run`
+- [x] On-key text labels (bundled font, rendered onto keys, verified)
 
 ### Daemon + ergonomics
 - [ ] `streamdeckd` long-running daemon, graceful reset on exit

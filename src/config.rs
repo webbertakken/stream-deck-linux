@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::actions::Builtin;
 use crate::error::{Error, Result};
 use crate::model::Model;
 
@@ -35,7 +36,7 @@ pub struct Config {
 }
 
 /// One key's picture and function.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ButtonConfig {
     /// Hardware key index.
@@ -50,6 +51,10 @@ pub struct ButtonConfig {
     /// Shell command to run when the key is pressed.
     #[serde(default)]
     pub run: Option<String>,
+    /// Built-in action to trigger when the key is pressed (e.g.
+    /// `brightness_up`, `brightness_down`, `brightness_set:70`, `reset`).
+    #[serde(default)]
+    pub builtin: Option<String>,
     /// Optional text label drawn centred on the key.
     #[serde(default)]
     pub label: Option<String>,
@@ -107,6 +112,16 @@ impl Config {
             // Surface bad colours at validation time, not mid-render.
             let _ = button.rgb()?;
             let _ = button.text_rgb()?;
+
+            if button.run.is_some() && button.builtin.is_some() {
+                return Err(Error::ConfigInvalid(format!(
+                    "key {} sets both run and builtin (choose one)",
+                    button.key
+                )));
+            }
+            if let Some(spec) = &button.builtin {
+                Builtin::parse(spec)?;
+            }
         }
         Ok(())
     }
@@ -237,6 +252,34 @@ run = "amixer set Master toggle"
     }
 
     #[test]
+    fn validate_accepts_builtin_button() {
+        let config = Config::from_toml_str(
+            "[[buttons]]\nkey = 1\nlabel = \"Dim\"\nbuiltin = \"brightness_down\"\n",
+        )
+        .unwrap();
+        assert!(config.validate(&Model::MK2).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_builtin() {
+        let config =
+            Config::from_toml_str("[[buttons]]\nkey = 1\nlabel = \"x\"\nbuiltin = \"nope\"\n")
+                .unwrap();
+        let err = config.validate(&Model::MK2).unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("unknown builtin")));
+    }
+
+    #[test]
+    fn validate_rejects_run_and_builtin_together() {
+        let config = Config::from_toml_str(
+            "[[buttons]]\nkey = 1\nlabel = \"x\"\nrun = \"true\"\nbuiltin = \"reset\"\n",
+        )
+        .unwrap();
+        let err = config.validate(&Model::MK2).unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("both run and builtin")));
+    }
+
+    #[test]
     fn validate_accepts_label_only_button() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 2\nlabel = \"Mute\"\n").unwrap();
         assert!(config.validate(&Model::MK2).is_ok());
@@ -270,12 +313,8 @@ run = "amixer set Master toggle"
     #[test]
     fn relative_image_resolves_against_base_dir() {
         let button = ButtonConfig {
-            key: 0,
             image: Some(PathBuf::from("icons/x.png")),
-            color: None,
-            run: None,
-            label: None,
-            text_color: None,
+            ..Default::default()
         };
         let resolved = button.resolved_image(Path::new("/etc/streamdeck")).unwrap();
         assert_eq!(resolved, PathBuf::from("/etc/streamdeck/icons/x.png"));
@@ -284,12 +323,8 @@ run = "amixer set Master toggle"
     #[test]
     fn absolute_image_path_is_kept() {
         let button = ButtonConfig {
-            key: 0,
             image: Some(PathBuf::from("/abs/x.png")),
-            color: None,
-            run: None,
-            label: None,
-            text_color: None,
+            ..Default::default()
         };
         let resolved = button.resolved_image(Path::new("/etc/streamdeck")).unwrap();
         assert_eq!(resolved, PathBuf::from("/abs/x.png"));
@@ -299,12 +334,8 @@ run = "amixer set Master toggle"
     fn tilde_image_path_expands_to_home() {
         std::env::set_var("HOME", "/home/tester");
         let button = ButtonConfig {
-            key: 0,
             image: Some(PathBuf::from("~/pics/x.png")),
-            color: None,
-            run: None,
-            label: None,
-            text_color: None,
+            ..Default::default()
         };
         let resolved = button.resolved_image(Path::new("/ignored")).unwrap();
         assert_eq!(resolved, PathBuf::from("/home/tester/pics/x.png"));

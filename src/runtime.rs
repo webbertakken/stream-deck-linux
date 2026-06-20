@@ -6,6 +6,7 @@ use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::actions::{Builtin, KeyAction, BRIGHTNESS_STEP};
 use crate::config::Config;
 use crate::device::StreamDeck;
 use crate::error::Result;
@@ -17,17 +18,24 @@ use crate::render::KeySurface;
 const ERROR_TILE: [u8; 3] = [255, 0, 255];
 /// Default label colour when none is configured.
 const DEFAULT_TEXT_COLOR: [u8; 3] = [255, 255, 255];
+/// Brightness assumed when the config does not specify one (for up/down steps).
+const DEFAULT_BRIGHTNESS: u8 = 50;
 
 /// How long each button read blocks before re-checking the shutdown flag.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-/// Build the key -> shell-command map from a config.
-pub fn action_map(config: &Config) -> HashMap<u8, String> {
-    config
-        .buttons
-        .iter()
-        .filter_map(|button| button.run.as_ref().map(|cmd| (button.key, cmd.clone())))
-        .collect()
+/// Build the key -> action map from a config. Errors on an unparseable builtin
+/// (validation should have caught it first).
+pub fn action_map(config: &Config) -> Result<HashMap<u8, KeyAction>> {
+    let mut map = HashMap::new();
+    for button in &config.buttons {
+        if let Some(run) = &button.run {
+            map.insert(button.key, KeyAction::Run(run.clone()));
+        } else if let Some(spec) = &button.builtin {
+            map.insert(button.key, KeyAction::Builtin(Builtin::parse(spec)?));
+        }
+    }
+    Ok(map)
 }
 
 /// Render a config onto the device: brightness, then each key's picture or
@@ -86,6 +94,28 @@ fn spawn(command: &str) -> std::io::Result<Child> {
     Command::new("sh").arg("-c").arg(command).spawn()
 }
 
+/// Apply a device-native built-in, updating tracked brightness.
+fn apply_builtin(deck: &StreamDeck, builtin: Builtin, brightness: &mut u8) -> Result<()> {
+    let new_brightness = match builtin {
+        Builtin::BrightnessUp => Some((*brightness).saturating_add(BRIGHTNESS_STEP).min(100)),
+        Builtin::BrightnessDown => Some(brightness.saturating_sub(BRIGHTNESS_STEP)),
+        Builtin::BrightnessSet(value) => Some(value.min(100)),
+        Builtin::Reset => None,
+    };
+    match new_brightness {
+        Some(value) => {
+            *brightness = value;
+            deck.set_brightness(value)?;
+            println!("brightness -> {value}%");
+        }
+        None => {
+            deck.reset()?;
+            println!("device reset");
+        }
+    }
+    Ok(())
+}
+
 /// Render the config and run the press-to-action loop until `shutdown` is set.
 pub fn run(
     deck: &mut StreamDeck,
@@ -99,9 +129,10 @@ pub fn run(
     }
 
     render(deck, config, base_dir)?;
-    let actions = action_map(config);
+    let actions = action_map(config)?;
     let key_count = deck.model().key_count as usize;
     let mut previous = vec![false; key_count];
+    let mut brightness = config.brightness.unwrap_or(DEFAULT_BRIGHTNESS);
 
     println!(
         "Running with {} mapped action(s). Press Ctrl-C to stop.",
@@ -116,11 +147,20 @@ pub fn run(
             if event.kind != KeyEventKind::Pressed {
                 continue;
             }
-            if let Some(command) = actions.get(&event.key) {
-                println!("key {} pressed -> {command}", event.key);
-                if let Err(err) = spawn(command) {
-                    eprintln!("error: failed to run '{command}': {err}");
+            match actions.get(&event.key) {
+                Some(KeyAction::Run(command)) => {
+                    println!("key {} pressed -> {command}", event.key);
+                    if let Err(err) = spawn(command) {
+                        eprintln!("error: failed to run '{command}': {err}");
+                    }
                 }
+                Some(KeyAction::Builtin(builtin)) => {
+                    println!("key {} pressed -> builtin {builtin:?}", event.key);
+                    if let Err(err) = apply_builtin(deck, *builtin, &mut brightness) {
+                        eprintln!("error: builtin {builtin:?} failed: {err}");
+                    }
+                }
+                None => {}
             }
         }
         previous = states;
@@ -134,21 +174,28 @@ mod tests {
     use crate::config::Config;
 
     #[test]
-    fn action_map_collects_only_keys_with_commands() {
+    fn action_map_collects_runs_and_builtins() {
         let config = Config::from_toml_str(
-            "[[buttons]]\nkey = 0\ncolor = \"#ffffff\"\nrun = \"echo hi\"\n\n[[buttons]]\nkey = 3\ncolor = \"#000000\"\n",
+            "[[buttons]]\nkey = 0\ncolor = \"#ffffff\"\nrun = \"echo hi\"\n\n[[buttons]]\nkey = 1\ncolor = \"#111111\"\nbuiltin = \"brightness_up\"\n\n[[buttons]]\nkey = 3\ncolor = \"#000000\"\n",
         )
         .unwrap();
 
-        let actions = action_map(&config);
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions.get(&0).map(String::as_str), Some("echo hi"));
+        let actions = action_map(&config).unwrap();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(
+            actions.get(&0),
+            Some(&KeyAction::Run("echo hi".to_string()))
+        );
+        assert_eq!(
+            actions.get(&1),
+            Some(&KeyAction::Builtin(Builtin::BrightnessUp))
+        );
         assert!(!actions.contains_key(&3));
     }
 
     #[test]
-    fn action_map_is_empty_without_commands() {
+    fn action_map_is_empty_without_actions() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 0\ncolor = \"#ffffff\"\n").unwrap();
-        assert!(action_map(&config).is_empty());
+        assert!(action_map(&config).unwrap().is_empty());
     }
 }
