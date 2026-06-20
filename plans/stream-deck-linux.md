@@ -66,5 +66,6 @@ Desktop verified: Linux Mint 22.3 Cinnamon, X11. SNI tray host present
 - [x] Config editor UI: 5x3 key grid; click a key to set image/colour/label/
       action; live-apply to device + save TOML (chose local web UI - see
       DECISIONS.md; verified via curl API + headless Chrome screenshot)
-- [ ] `streamdeck install` helper: copy icon to hicolor, write .desktop entries
+- [x] `streamdeck install`/`uninstall`: embedded icons -> hicolor + launcher
+      .desktop (verified: desktop-file-validate passes, icon cache refreshed)
 - [x] CI needs no GUI deps (web UI + ksni are pure-Rust, no system libs)

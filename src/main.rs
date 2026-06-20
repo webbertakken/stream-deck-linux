@@ -11,7 +11,7 @@ use streamdeck::events::diff_states;
 use streamdeck::runtime::Control;
 use streamdeck::tray::StreamDeckTray;
 use streamdeck::webui::WebUi;
-use streamdeck::{autostart, runtime, Error, Model, StreamDeck};
+use streamdeck::{autostart, install, runtime, Error, Model, StreamDeck};
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -31,6 +31,8 @@ fn main() -> ExitCode {
         "tray" => cmd_tray(&args),
         "ui" => cmd_ui(&args),
         "autostart" => cmd_autostart(&args),
+        "install" => cmd_install(),
+        "uninstall" => cmd_uninstall(),
         "watch" => cmd_watch(&args),
         "help" | "-h" | "--help" => {
             print_help();
@@ -289,6 +291,31 @@ fn cmd_autostart(args: &[String]) -> Result<(), Error> {
     Ok(())
 }
 
+fn cmd_install() -> Result<(), Error> {
+    let exe = std::env::current_exe()?;
+    let exec = format!("{} tray", exe.display());
+    let written = install::install(&exec)?;
+    println!("Installed {} files:", written.len());
+    for path in &written {
+        println!("  {}", path.display());
+    }
+    // Best-effort icon cache refresh (harmless if the tool is absent).
+    if let Some(hicolor) = written.first().and_then(|p| p.ancestors().nth(3)) {
+        let _ = std::process::Command::new("gtk-update-icon-cache")
+            .args(["-f", "-t"])
+            .arg(hicolor)
+            .status();
+    }
+    println!("Done. The 'streamdeck' icon and launcher are now available.");
+    Ok(())
+}
+
+fn cmd_uninstall() -> Result<(), Error> {
+    install::uninstall()?;
+    println!("Removed installed icons and launcher entry.");
+    Ok(())
+}
+
 /// Write a friendly starter config if none exists yet.
 fn ensure_config_exists(path: &PathBuf) -> Result<(), Error> {
     if path.exists() {
@@ -399,6 +426,8 @@ fn print_help() {
          \x20 tray [config.toml]       run in the system tray with a daemon\n\
          \x20 ui [config.toml]         open the web editor + run the daemon\n\
          \x20 autostart <enable|disable|status>  manage login autostart\n\
+         \x20 install                  install icons + app launcher entry\n\
+         \x20 uninstall                remove installed icons + launcher\n\
          \x20 watch [seconds]          print button press/release events"
     );
 }

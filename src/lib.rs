@@ -12,6 +12,7 @@ pub mod error;
 pub mod events;
 pub mod hid;
 pub mod image;
+pub mod install;
 pub mod model;
 pub mod protocol;
 pub mod render;
