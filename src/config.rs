@@ -50,9 +50,12 @@ pub struct ButtonConfig {
     /// Shell command to run when the key is pressed.
     #[serde(default)]
     pub run: Option<String>,
-    /// Optional text label (reserved for future on-key text rendering).
+    /// Optional text label drawn centred on the key.
     #[serde(default)]
     pub label: Option<String>,
+    /// Colour of the label text as `#RRGGBB` (defaults to white).
+    #[serde(default)]
+    pub text_color: Option<String>,
 }
 
 impl Config {
@@ -95,14 +98,15 @@ impl Config {
             }
             *slot = true;
 
-            if button.image.is_none() && button.color.is_none() {
+            if button.image.is_none() && button.color.is_none() && button.label.is_none() {
                 return Err(Error::ConfigInvalid(format!(
-                    "key {} has neither an image nor a color",
+                    "key {} has no image, color or label",
                     button.key
                 )));
             }
             // Surface bad colours at validation time, not mid-render.
             let _ = button.rgb()?;
+            let _ = button.text_rgb()?;
         }
         Ok(())
     }
@@ -124,12 +128,21 @@ impl ButtonConfig {
 
     /// Parse the colour field into RGB, if present.
     pub fn rgb(&self) -> Result<Option<[u8; 3]>> {
-        match &self.color {
-            None => Ok(None),
-            Some(hex) => parse_hex_color(hex)
-                .map(Some)
-                .ok_or_else(|| Error::ConfigInvalid(format!("invalid colour '{hex}'"))),
-        }
+        parse_optional_hex(self.color.as_deref())
+    }
+
+    /// Parse the text colour field into RGB, if present.
+    pub fn text_rgb(&self) -> Result<Option<[u8; 3]>> {
+        parse_optional_hex(self.text_color.as_deref())
+    }
+}
+
+fn parse_optional_hex(value: Option<&str>) -> Result<Option<[u8; 3]>> {
+    match value {
+        None => Ok(None),
+        Some(hex) => parse_hex_color(hex)
+            .map(Some)
+            .ok_or_else(|| Error::ConfigInvalid(format!("invalid colour '{hex}'"))),
     }
 }
 
@@ -220,9 +233,22 @@ run = "amixer set Master toggle"
     fn validate_rejects_button_without_visual() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 2\nrun = \"true\"\n").unwrap();
         let err = config.validate(&Model::MK2).unwrap_err();
-        assert!(
-            matches!(err, Error::ConfigInvalid(m) if m.contains("neither an image nor a color"))
-        );
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color or label")));
+    }
+
+    #[test]
+    fn validate_accepts_label_only_button() {
+        let config = Config::from_toml_str("[[buttons]]\nkey = 2\nlabel = \"Mute\"\n").unwrap();
+        assert!(config.validate(&Model::MK2).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_bad_text_colour() {
+        let config =
+            Config::from_toml_str("[[buttons]]\nkey = 2\nlabel = \"x\"\ntext_color = \"zzz\"\n")
+                .unwrap();
+        let err = config.validate(&Model::MK2).unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("invalid colour")));
     }
 
     #[test]
@@ -249,6 +275,7 @@ run = "amixer set Master toggle"
             color: None,
             run: None,
             label: None,
+            text_color: None,
         };
         let resolved = button.resolved_image(Path::new("/etc/streamdeck")).unwrap();
         assert_eq!(resolved, PathBuf::from("/etc/streamdeck/icons/x.png"));
@@ -262,6 +289,7 @@ run = "amixer set Master toggle"
             color: None,
             run: None,
             label: None,
+            text_color: None,
         };
         let resolved = button.resolved_image(Path::new("/etc/streamdeck")).unwrap();
         assert_eq!(resolved, PathBuf::from("/abs/x.png"));
@@ -276,6 +304,7 @@ run = "amixer set Master toggle"
             color: None,
             run: None,
             label: None,
+            text_color: None,
         };
         let resolved = button.resolved_image(Path::new("/ignored")).unwrap();
         assert_eq!(resolved, PathBuf::from("/home/tester/pics/x.png"));

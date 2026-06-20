@@ -39,7 +39,7 @@ pub fn orient(spec: &ImageSpec, mut img: RgbImage) -> RgbImage {
 }
 
 /// Encode an oriented RGB image to the model's wire format.
-fn encode(spec: &ImageSpec, img: &RgbImage) -> Result<Vec<u8>> {
+pub fn encode_rgb(spec: &ImageSpec, img: &RgbImage) -> Result<Vec<u8>> {
     let mut buffer = Vec::new();
     match spec.format {
         ImageFormat::Jpeg => {
@@ -54,7 +54,7 @@ fn encode(spec: &ImageSpec, img: &RgbImage) -> Result<Vec<u8>> {
 pub fn encode_key_image(spec: &ImageSpec, source: &DynamicImage) -> Result<Vec<u8>> {
     let fitted = fit(spec, source);
     let oriented = orient(spec, fitted);
-    encode(spec, &oriented)
+    encode_rgb(spec, &oriented)
 }
 
 /// Build the encoded payload for a key filled with a single solid colour.
@@ -62,7 +62,7 @@ pub fn solid_color(spec: &ImageSpec, rgb: [u8; 3]) -> Result<Vec<u8>> {
     let img = RgbImage::from_pixel(spec.width, spec.height, Rgb(rgb));
     // Solid colours are orientation-invariant, but keep the pipeline uniform.
     let oriented = orient(spec, img);
-    encode(spec, &oriented)
+    encode_rgb(spec, &oriented)
 }
 
 #[cfg(test)]

@@ -10,10 +10,13 @@ use crate::config::Config;
 use crate::device::StreamDeck;
 use crate::error::Result;
 use crate::events::{diff_states, KeyEventKind};
+use crate::render::KeySurface;
 
 /// Colour shown on a key whose image failed to load and that has no colour
 /// fallback, so a broken tile is loud rather than silent.
 const ERROR_TILE: [u8; 3] = [255, 0, 255];
+/// Default label colour when none is configured.
+const DEFAULT_TEXT_COLOR: [u8; 3] = [255, 255, 255];
 
 /// How long each button read blocks before re-checking the shutdown flag.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -36,11 +39,16 @@ pub fn render(deck: &mut StreamDeck, config: &Config, base_dir: &Path) -> Result
     }
     deck.clear_all()?;
 
+    let spec = deck.model().image;
     for button in &config.buttons {
-        let rendered_image = match button.resolved_image(base_dir) {
+        let mut surface = KeySurface::new(&spec);
+
+        // Background: picture if present and loadable, else colour, else an
+        // error tile for a broken image with no colour fallback.
+        let drew_image = match button.resolved_image(base_dir) {
             Some(path) => match image::open(&path) {
                 Ok(picture) => {
-                    deck.set_key_picture(button.key, &picture)?;
+                    surface.draw_image(&picture);
                     true
                 }
                 Err(err) => {
@@ -54,15 +62,21 @@ pub fn render(deck: &mut StreamDeck, config: &Config, base_dir: &Path) -> Result
             },
             None => false,
         };
-
-        if rendered_image {
-            continue;
+        if !drew_image {
+            match button.rgb()? {
+                Some(rgb) => surface.fill(rgb),
+                None if button.label.is_some() => {} // keep black background
+                None => surface.fill(ERROR_TILE),
+            }
         }
 
-        match button.rgb()? {
-            Some(rgb) => deck.set_key_color(button.key, rgb)?,
-            None => deck.set_key_color(button.key, ERROR_TILE)?,
+        // Foreground: optional centred text label.
+        if let Some(label) = &button.label {
+            let color = button.text_rgb()?.unwrap_or(DEFAULT_TEXT_COLOR);
+            surface.draw_text_centered(label, color);
         }
+
+        deck.set_key_image(button.key, &surface.encode()?)?;
     }
     Ok(())
 }

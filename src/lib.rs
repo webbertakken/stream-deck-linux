@@ -12,6 +12,7 @@ pub mod hid;
 pub mod image;
 pub mod model;
 pub mod protocol;
+pub mod render;
 pub mod runtime;
 
 pub use config::{ButtonConfig, Config};
