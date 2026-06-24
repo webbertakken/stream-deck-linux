@@ -191,13 +191,29 @@ fn start_daemon(config_path: PathBuf) -> Result<(Model, Sender<Control>, JoinHan
     Ok((model, tx, handle))
 }
 
-/// Start the in-process web editor server on an ephemeral local port.
+/// Preferred local port for the editor, so the URL is stable across restarts.
+const PREFERRED_WEB_ADDR: &str = "127.0.0.1:57617";
+
+/// Bind the editor to the preferred port, falling back to an ephemeral one.
+fn bind_web(model: Model, config_path: PathBuf, control: Sender<Control>) -> Result<WebUi, Error> {
+    match WebUi::bind(
+        PREFERRED_WEB_ADDR,
+        model,
+        config_path.clone(),
+        control.clone(),
+    ) {
+        Ok(web) => Ok(web),
+        Err(_) => WebUi::bind("127.0.0.1:0", model, config_path, control),
+    }
+}
+
+/// Start the in-process web editor server.
 fn start_web_ui(
     model: Model,
     config_path: PathBuf,
     control: Sender<Control>,
 ) -> Result<(String, JoinHandle<()>), Error> {
-    let web = WebUi::bind("127.0.0.1:0", model, config_path, control)?;
+    let web = bind_web(model, config_path, control)?;
     let url = web.url();
     let handle = std::thread::spawn(move || {
         if let Err(err) = web.serve(&SHUTDOWN) {
@@ -235,7 +251,7 @@ fn cmd_ui(args: &[String]) -> Result<(), Error> {
     install_signal_handlers();
 
     let (model, tx, daemon) = start_daemon(config_path.clone())?;
-    let web = WebUi::bind("127.0.0.1:0", model, config_path, tx)?;
+    let web = bind_web(model, config_path, tx)?;
     let url = web.url();
     println!("Editor for {} at {url}", model.name);
     open_in_browser(&url);
