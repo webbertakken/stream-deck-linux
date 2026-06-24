@@ -90,9 +90,13 @@ streamdeck autostart disable
   embedded app icon, so it works on KDE, GNOME (with an SNI extension),
   Cinnamon/XApp and other SNI hosts.
 - **Web editor**: served locally (e.g. `http://127.0.0.1:NNNNN`). Pick a key to
-  set its label, text colour, background colour, image path and action (run
-  command or built-in). Each tile previews exactly what the device shows.
-  Saving writes the TOML and re-renders the device immediately.
+  set its label, text colour, background colour, image path and action. Edits
+  apply **live** - there is no Save button; every change renders on the device
+  and is written to the config immediately. Each tile previews exactly what the
+  device shows.
+- **Open application**: the editor lists installed desktop apps; choose one and
+  the key launches it (via `gtk-launch`), auto-filling the label and, when a
+  raster icon is found, the key image.
 - **Autostart**: writes `~/.config/autostart/streamdeck.desktop` pointing at the
   current binary's `tray` mode. A first run creates a starter config if none
   exists.

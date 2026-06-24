@@ -50,7 +50,12 @@ libudev/hidapi system dependency. `image` crate for the picture pipeline.
 - [x] udev rule doc (uaccess already present here) - in README
 - [x] CI: fmt + clippy + test
 - [x] README with setup + usage
-- [ ] `run` mode hot-reloads config on file change
+- [ ] `run` mode hot-reloads config on external file change (web UI already
+      applies live; tray has a Reload action)
+- [x] Web editor applies edits live (no Save button); verified via user's own
+      live edits persisting (colour + brightness) and pixel check
+- [x] "Open application" action: lists installed apps, launches via gtk-launch,
+      auto-fills label + raster icon (62/156 apps had a PNG icon here)
 
 ### Desktop integration (icon, tray, UI, autostart)
 Desktop verified: Linux Mint 22.3 Cinnamon, X11. SNI tray host present

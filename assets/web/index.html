@@ -19,7 +19,7 @@
           <input id="brightness" type="range" min="0" max="100" step="5" value="60" />
           <output id="brightnessOut" for="brightness">60%</output>
         </label>
-        <button id="save" class="btn btn--primary" type="button">Save &amp; apply</button>
+        <span class="live" title="Changes apply to the device automatically">● Live</span>
       </div>
     </header>
 
@@ -61,9 +61,13 @@
           <fieldset class="field action">
             <legend>Action</legend>
             <label class="radio"><input type="radio" name="act" value="none" /> None</label>
+            <label class="radio"><input type="radio" name="act" value="openapp" /> Open application</label>
             <label class="radio"><input type="radio" name="act" value="run" /> Run command</label>
             <label class="radio"><input type="radio" name="act" value="builtin" /> Built-in</label>
 
+            <select id="appSelect" aria-label="Application" hidden>
+              <option value="">Choose an application…</option>
+            </select>
             <input id="run" type="text" placeholder="e.g. alacritty" hidden />
             <div id="builtinRow" hidden>
               <select id="builtin" aria-label="Built-in action">

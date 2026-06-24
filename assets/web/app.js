@@ -5,6 +5,7 @@ const state = {
   model: { keyCount: 15, columns: 5, rows: 3, name: "" },
   brightness: 60,
   buttons: new Map(), // key -> button object
+  apps: [],
   selected: 0,
 };
 
@@ -15,11 +16,17 @@ function statusMsg(text, kind) {
   else delete el.dataset.kind;
 }
 
+// A button is empty when nothing is set at all.
 function isEmpty(b) {
   return (
     !b ||
     (!b.image && !b.color && !b.label && !b.run && !b.builtin && !b.text_color)
   );
+}
+
+// A button is persistable/renderable only with a visual (image/colour/label).
+function hasVisual(b) {
+  return !!(b && (b.image || b.color || b.label));
 }
 
 function previewUrl(key) {
@@ -53,6 +60,19 @@ function buildGrid() {
   }
 }
 
+function buildAppOptions() {
+  const sel = $("appSelect");
+  sel.innerHTML = '<option value="">Choose an application\u2026</option>';
+  for (const app of state.apps) {
+    const opt = document.createElement("option");
+    opt.value = app.command;
+    opt.textContent = app.name;
+    opt.dataset.name = app.name;
+    if (app.icon) opt.dataset.icon = app.icon;
+    sel.appendChild(opt);
+  }
+}
+
 function selectKey(key) {
   state.selected = key;
   document.querySelectorAll(".key").forEach((c) =>
@@ -71,12 +91,14 @@ function populateForm(b) {
   $("image").value = b.image || "";
 
   let act = "none";
-  if (b.run) act = "run";
+  if (b.run && b.run.startsWith("gtk-launch ")) act = "openapp";
+  else if (b.run) act = "run";
   else if (b.builtin) act = "builtin";
   document.querySelectorAll('input[name="act"]').forEach((r) => {
     r.checked = r.value === act;
   });
   $("run").value = b.run || "";
+  $("appSelect").value = act === "openapp" ? b.run : "";
 
   let builtin = "brightness_up";
   let bvalue = 70;
@@ -94,8 +116,13 @@ function populateForm(b) {
   syncActionVisibility();
 }
 
+function currentAction() {
+  return document.querySelector('input[name="act"]:checked')?.value || "none";
+}
+
 function syncActionVisibility() {
-  const act = document.querySelector('input[name="act"]:checked')?.value || "none";
+  const act = currentAction();
+  $("appSelect").hidden = act !== "openapp";
   $("run").hidden = act !== "run";
   $("builtinRow").hidden = act !== "builtin";
   $("builtinValue").hidden = !($("builtin").value === "brightness_set");
@@ -111,8 +138,11 @@ function readForm() {
   const image = $("image").value.trim();
   if (image) b.image = image;
 
-  const act = document.querySelector('input[name="act"]:checked')?.value || "none";
-  if (act === "run") {
+  const act = currentAction();
+  if (act === "openapp") {
+    const cmd = $("appSelect").value;
+    if (cmd) b.run = cmd;
+  } else if (act === "run") {
     const run = $("run").value.trim();
     if (run) b.run = run;
   } else if (act === "builtin") {
@@ -122,36 +152,49 @@ function readForm() {
   return b;
 }
 
-// Update the in-memory model whenever the form changes.
 function onFormChange() {
   const b = readForm();
   if (isEmpty(b)) state.buttons.delete(state.selected);
   else state.buttons.set(state.selected, b);
   syncActionVisibility();
+  scheduleApply();
+}
+
+// When an app is chosen, helpfully fill the label and icon if still blank.
+function onAppPicked() {
+  const opt = $("appSelect").selectedOptions[0];
+  if (opt && opt.value) {
+    if (!$("label").value.trim() && opt.dataset.name) $("label").value = opt.dataset.name;
+    if (!$("image").value.trim() && opt.dataset.icon) $("image").value = opt.dataset.icon;
+  }
+  onFormChange();
 }
 
 function collectConfig() {
   const buttons = [...state.buttons.values()]
-    .filter((b) => !isEmpty(b))
+    .filter(hasVisual)
     .sort((a, z) => a.key - z.key);
   return { brightness: state.brightness, buttons };
 }
 
-async function save() {
-  const config = collectConfig();
-  statusMsg("Saving…");
+let applyTimer = null;
+function scheduleApply() {
+  clearTimeout(applyTimer);
+  applyTimer = setTimeout(applyNow, 250);
+}
+
+async function applyNow() {
   try {
     const res = await fetch("/api/state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
+      body: JSON.stringify(collectConfig()),
     });
     if (res.ok) {
-      statusMsg("Saved and applied to the device.", "ok");
+      statusMsg("Applied.", "ok");
       refreshAllPreviews();
     } else {
-      const text = await res.text();
-      statusMsg(`Could not save: ${text}`, "err");
+      statusMsg(`Could not apply: ${await res.text()}`, "err");
     }
   } catch (err) {
     statusMsg(`Network error: ${err}`, "err");
@@ -176,31 +219,36 @@ function onBrightness() {
 function clearKey() {
   state.buttons.delete(state.selected);
   populateForm({ key: state.selected });
-  refreshPreview(state.selected);
+  applyNow();
 }
 
 async function load() {
-  const res = await fetch("/api/state");
-  const data = await res.json();
+  const [stateRes, appsRes] = await Promise.all([
+    fetch("/api/state"),
+    fetch("/api/apps"),
+  ]);
+  const data = await stateRes.json();
+  state.apps = await appsRes.json().catch(() => []);
   state.model = data.model;
   state.brightness = data.brightness ?? 60;
   state.buttons = new Map();
   for (const b of data.buttons || []) state.buttons.set(b.key, b);
 
-  $("model").textContent = data.model.name ? `· ${data.model.name}` : "";
+  $("model").textContent = data.model.name ? `\u00b7 ${data.model.name}` : "";
   $("brightness").value = state.brightness;
   $("brightnessOut").textContent = `${state.brightness}%`;
 
+  buildAppOptions();
   buildGrid();
   selectKey(0);
-  statusMsg("Ready.", "ok");
+  statusMsg(`Ready \u2014 ${state.apps.length} apps. Edits apply live.`, "ok");
 }
 
 function wire() {
   $("form").addEventListener("input", onFormChange);
   $("form").addEventListener("change", onFormChange);
   $("builtin").addEventListener("change", syncActionVisibility);
-  $("save").addEventListener("click", save);
+  $("appSelect").addEventListener("change", onAppPicked);
   $("clearKey").addEventListener("click", clearKey);
   $("brightness").addEventListener("input", onBrightness);
 }

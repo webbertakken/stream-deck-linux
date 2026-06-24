@@ -109,6 +109,7 @@ impl WebUi {
             (Method::Get, "/app.css") => {
                 respond(request, 200, "text/css; charset=utf-8", APP_CSS.as_bytes())
             }
+            (Method::Get, "/api/apps") => self.get_apps(request),
             (Method::Get, "/api/state") => self.get_state(request),
             (Method::Post, "/api/state") => self.post_state(request),
             (Method::Post, "/api/brightness") => self.post_brightness(request),
@@ -132,6 +133,12 @@ impl WebUi {
                 buttons: Vec::new(),
             }
         }
+    }
+
+    fn get_apps(&self, request: Request) -> Result<()> {
+        let apps = crate::apps::list();
+        let body = serde_json::to_vec(&apps).map_err(|e| Error::Web(e.to_string()))?;
+        respond(request, 200, "application/json", &body)
     }
 
     fn get_state(&self, request: Request) -> Result<()> {

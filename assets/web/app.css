@@ -78,6 +78,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.live {
+  color: #7fe0a8;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .status {
   margin: 0;
   padding: 6px 20px;
