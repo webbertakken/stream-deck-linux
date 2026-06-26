@@ -56,28 +56,6 @@ fn spawn(command: &str) -> std::io::Result<Child> {
     Command::new("sh").arg("-c").arg(command).spawn()
 }
 
-/// Apply a device-native built-in, updating tracked brightness.
-fn apply_builtin(deck: &StreamDeck, builtin: Builtin, brightness: &mut u8) -> Result<()> {
-    let new_brightness = match builtin {
-        Builtin::BrightnessUp => Some((*brightness).saturating_add(BRIGHTNESS_STEP).min(100)),
-        Builtin::BrightnessDown => Some(brightness.saturating_sub(BRIGHTNESS_STEP)),
-        Builtin::BrightnessSet(value) => Some(value.min(100)),
-        Builtin::Reset => None,
-    };
-    match new_brightness {
-        Some(value) => {
-            *brightness = value;
-            deck.set_brightness(value)?;
-            println!("brightness -> {value}%");
-        }
-        None => {
-            deck.reset()?;
-            println!("device reset");
-        }
-    }
-    Ok(())
-}
-
 /// A command sent to the running daemon (e.g. from a tray menu).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
@@ -99,6 +77,7 @@ struct Session {
     actions: HashMap<u8, KeyAction>,
     brightness: u8,
     previous: Vec<bool>,
+    tools: crate::system::Tools,
 }
 
 impl Session {
@@ -121,7 +100,54 @@ impl Session {
             actions,
             brightness,
             previous,
+            tools: crate::system::detect_tools(),
         })
+    }
+
+    /// Run a built-in action: deck-native ones act on the device directly;
+    /// open/media/volume resolve a system command and spawn it.
+    fn run_builtin(&mut self, builtin: &Builtin) -> Result<()> {
+        use crate::system;
+        let new_brightness = match builtin {
+            Builtin::BrightnessUp => Some(self.brightness.saturating_add(BRIGHTNESS_STEP).min(100)),
+            Builtin::BrightnessDown => Some(self.brightness.saturating_sub(BRIGHTNESS_STEP)),
+            Builtin::BrightnessSet(value) => Some((*value).min(100)),
+            Builtin::BrightnessMax => Some(100),
+            Builtin::BrightnessMin => Some(0),
+            _ => None,
+        };
+        if let Some(value) = new_brightness {
+            self.brightness = value;
+            self.deck.set_brightness(value)?;
+            println!("brightness -> {value}%");
+            return Ok(());
+        }
+        match builtin {
+            Builtin::Reset => {
+                self.deck.reset()?;
+                println!("device reset");
+            }
+            Builtin::Open(target) => self.spawn_command(&system::open_command(target)),
+            Builtin::Media(action) => match system::media_command(*action, &self.tools) {
+                Some(cmd) => self.spawn_command(&cmd),
+                None => eprintln!("error: media control needs `playerctl` (not installed)"),
+            },
+            Builtin::Volume(action) => match system::volume_command(*action, &self.tools) {
+                Some(cmd) => self.spawn_command(&cmd),
+                None => eprintln!("error: volume control needs wpctl/pactl/amixer (none found)"),
+            },
+            // Brightness variants handled above.
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Spawn a resolved system command, logging failures.
+    fn spawn_command(&self, command: &str) {
+        println!("builtin -> {command}");
+        if let Err(err) = spawn(command) {
+            eprintln!("error: failed to run '{command}': {err}");
+        }
     }
 
     /// Re-read the config from disk and re-render.
@@ -140,18 +166,10 @@ impl Session {
     /// Apply a control command. `Quit` is handled by the caller.
     fn handle_control(&mut self, control: Control) -> Result<()> {
         match control {
-            Control::BrightnessUp => {
-                apply_builtin(&self.deck, Builtin::BrightnessUp, &mut self.brightness)
-            }
-            Control::BrightnessDown => {
-                apply_builtin(&self.deck, Builtin::BrightnessDown, &mut self.brightness)
-            }
-            Control::SetBrightness(value) => apply_builtin(
-                &self.deck,
-                Builtin::BrightnessSet(value),
-                &mut self.brightness,
-            ),
-            Control::Reset => apply_builtin(&self.deck, Builtin::Reset, &mut self.brightness),
+            Control::BrightnessUp => self.run_builtin(&Builtin::BrightnessUp),
+            Control::BrightnessDown => self.run_builtin(&Builtin::BrightnessDown),
+            Control::SetBrightness(value) => self.run_builtin(&Builtin::BrightnessSet(value)),
+            Control::Reset => self.run_builtin(&Builtin::Reset),
             Control::Reload => self.reload(),
             Control::Quit => Ok(()),
         }
@@ -179,7 +197,7 @@ impl Session {
                 }
                 Some(KeyAction::Builtin(builtin)) => {
                     println!("key {} pressed -> builtin {builtin:?}", event.key);
-                    if let Err(err) = apply_builtin(&self.deck, builtin, &mut self.brightness) {
+                    if let Err(err) = self.run_builtin(&builtin) {
                         eprintln!("error: builtin {builtin:?} failed: {err}");
                     }
                 }

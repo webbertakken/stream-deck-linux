@@ -18,6 +18,7 @@ pub mod model;
 pub mod protocol;
 pub mod render;
 pub mod runtime;
+pub mod system;
 pub mod tray;
 pub mod webui;
 

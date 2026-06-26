@@ -71,12 +71,30 @@
             <input id="run" type="text" placeholder="e.g. alacritty" hidden />
             <div id="builtinRow" hidden>
               <select id="builtin" aria-label="Built-in action">
-                <option value="brightness_up">Brightness +</option>
-                <option value="brightness_down">Brightness -</option>
-                <option value="brightness_set">Set brightness…</option>
-                <option value="reset">Reset device</option>
+                <optgroup label="Brightness">
+                  <option value="brightness_up">Brightness +</option>
+                  <option value="brightness_down">Brightness -</option>
+                  <option value="brightness_max">Brightness max</option>
+                  <option value="brightness_min">Brightness min</option>
+                  <option value="brightness_set">Set brightness…</option>
+                </optgroup>
+                <optgroup label="Media">
+                  <option value="media_play_pause">Media: play / pause</option>
+                  <option value="media_next">Media: next</option>
+                  <option value="media_prev">Media: previous</option>
+                </optgroup>
+                <optgroup label="Volume">
+                  <option value="volume_up">Volume +</option>
+                  <option value="volume_down">Volume -</option>
+                  <option value="volume_mute">Volume mute</option>
+                </optgroup>
+                <optgroup label="Other">
+                  <option value="open">Open URL / file…</option>
+                  <option value="reset">Reset device</option>
+                </optgroup>
               </select>
               <input id="builtinValue" type="number" min="0" max="100" value="70" hidden aria-label="Brightness value" />
+              <input id="openTarget" type="text" placeholder="https://… or /path/to/file" hidden aria-label="Open target" />
             </div>
           </fieldset>
 

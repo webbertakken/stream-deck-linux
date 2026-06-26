@@ -102,16 +102,21 @@ function populateForm(b) {
 
   let builtin = "brightness_up";
   let bvalue = 70;
+  let openTarget = "";
   if (b.builtin) {
     if (b.builtin.startsWith("brightness_set:") || b.builtin.startsWith("brightness:")) {
       builtin = "brightness_set";
       bvalue = parseInt(b.builtin.split(":")[1], 10) || 70;
+    } else if (b.builtin.startsWith("open:")) {
+      builtin = "open";
+      openTarget = b.builtin.slice("open:".length);
     } else {
       builtin = b.builtin;
     }
   }
   $("builtin").value = builtin;
   $("builtinValue").value = bvalue;
+  $("openTarget").value = openTarget;
 
   syncActionVisibility();
 }
@@ -126,6 +131,7 @@ function syncActionVisibility() {
   $("run").hidden = act !== "run";
   $("builtinRow").hidden = act !== "builtin";
   $("builtinValue").hidden = !($("builtin").value === "brightness_set");
+  $("openTarget").hidden = !($("builtin").value === "open");
 }
 
 function readForm() {
@@ -147,7 +153,14 @@ function readForm() {
     if (run) b.run = run;
   } else if (act === "builtin") {
     const sel = $("builtin").value;
-    b.builtin = sel === "brightness_set" ? `brightness_set:${$("builtinValue").value}` : sel;
+    if (sel === "brightness_set") {
+      b.builtin = `brightness_set:${$("builtinValue").value}`;
+    } else if (sel === "open") {
+      const target = $("openTarget").value.trim();
+      if (target) b.builtin = `open:${target}`;
+    } else {
+      b.builtin = sel;
+    }
   }
   return b;
 }
