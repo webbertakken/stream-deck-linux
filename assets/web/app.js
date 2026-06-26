@@ -60,16 +60,124 @@ function buildGrid() {
   }
 }
 
-function buildAppOptions() {
-  const sel = $("appSelect");
-  sel.innerHTML = '<option value="">Choose an application\u2026</option>';
-  for (const app of state.apps) {
-    const opt = document.createElement("option");
-    opt.value = app.command;
-    opt.textContent = app.name;
-    opt.dataset.name = app.name;
-    if (app.icon) opt.dataset.icon = app.icon;
-    sel.appendChild(opt);
+// ---- Fuzzy application search (combobox) ----
+const MAX_APP_RESULTS = 30;
+
+// Subsequence fuzzy score; -1 when not all query chars match in order.
+function fuzzyScore(query, text) {
+  if (!query) return 0;
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  let qi = 0;
+  let score = 0;
+  let prev = -2;
+  let ti = 0;
+  for (; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      score += 1;
+      if (ti === prev + 1) score += 4; // consecutive run
+      if (ti === 0 || /[\s\-_./]/.test(t[ti - 1])) score += 3; // word boundary
+      prev = ti;
+      qi++;
+    }
+  }
+  if (qi < q.length) return -1;
+  return score - ti * 0.01; // gently prefer shorter/earlier matches
+}
+
+function appMatches(query) {
+  const q = query.trim();
+  if (!q) return state.apps.slice(0, MAX_APP_RESULTS);
+  return state.apps
+    .map((app) => ({ app, score: fuzzyScore(q, app.name) }))
+    .filter((m) => m.score >= 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_APP_RESULTS)
+    .map((m) => m.app);
+}
+
+function renderAppResults() {
+  const ul = $("appResults");
+  ul.innerHTML = "";
+  if (state.appMatches.length === 0) {
+    const li = document.createElement("li");
+    li.className = "combo__empty";
+    li.textContent = "No matching applications";
+    ul.appendChild(li);
+    return;
+  }
+  state.appMatches.forEach((app, i) => {
+    const li = document.createElement("li");
+    li.className = "combo__option";
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", i === state.appActive ? "true" : "false");
+    if (app.icon) {
+      const img = document.createElement("img");
+      img.className = "combo__icon";
+      img.src = `/api/icon?path=${encodeURIComponent(app.icon)}`;
+      img.alt = "";
+      li.appendChild(img);
+    }
+    const span = document.createElement("span");
+    span.className = "combo__name";
+    span.textContent = app.name;
+    li.appendChild(span);
+    // mousedown (not click) so it fires before the input blur closes the list
+    li.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      chooseApp(app);
+    });
+    ul.appendChild(li);
+  });
+}
+
+function openAppResults() {
+  const ul = $("appResults");
+  ul.hidden = false;
+  $("appQuery").setAttribute("aria-expanded", "true");
+}
+
+function closeAppResults() {
+  const ul = $("appResults");
+  ul.hidden = true;
+  state.appActive = -1;
+  $("appQuery").setAttribute("aria-expanded", "false");
+}
+
+function chooseApp(app) {
+  $("appCommand").value = app.command;
+  $("appQuery").value = app.name;
+  closeAppResults();
+  if (!$("label").value.trim()) $("label").value = app.name;
+  if (!$("image").value.trim() && app.icon) $("image").value = app.icon;
+  onFormChange();
+}
+
+function onAppInput(e) {
+  e.stopPropagation(); // don't let typing trigger a config apply
+  state.appMatches = appMatches($("appQuery").value);
+  state.appActive = state.appMatches.length ? 0 : -1;
+  renderAppResults();
+  openAppResults();
+}
+
+function onAppKeydown(e) {
+  if ($("appResults").hidden && e.key !== "ArrowDown") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if ($("appResults").hidden) onAppInput(e);
+    const n = state.appMatches.length;
+    if (!n) return;
+    const dir = e.key === "ArrowDown" ? 1 : -1;
+    state.appActive = (state.appActive + dir + n) % n;
+    renderAppResults();
+  } else if (e.key === "Enter") {
+    if (state.appActive >= 0 && state.appMatches[state.appActive]) {
+      e.preventDefault();
+      chooseApp(state.appMatches[state.appActive]);
+    }
+  } else if (e.key === "Escape") {
+    closeAppResults();
   }
 }
 
@@ -98,7 +206,15 @@ function populateForm(b) {
     r.checked = r.value === act;
   });
   $("run").value = b.run || "";
-  $("appSelect").value = act === "openapp" ? b.run : "";
+  if (act === "openapp") {
+    $("appCommand").value = b.run || "";
+    const found = state.apps.find((a) => a.command === b.run);
+    $("appQuery").value = found ? found.name : b.run || "";
+  } else {
+    $("appCommand").value = "";
+    $("appQuery").value = "";
+  }
+  closeAppResults();
 
   let builtin = "brightness_up";
   let bvalue = 70;
@@ -127,7 +243,8 @@ function currentAction() {
 
 function syncActionVisibility() {
   const act = currentAction();
-  $("appSelect").hidden = act !== "openapp";
+  $("appSearch").hidden = act !== "openapp";
+  if (act !== "openapp") closeAppResults();
   $("run").hidden = act !== "run";
   $("builtinRow").hidden = act !== "builtin";
   $("builtinValue").hidden = !($("builtin").value === "brightness_set");
@@ -146,7 +263,7 @@ function readForm() {
 
   const act = currentAction();
   if (act === "openapp") {
-    const cmd = $("appSelect").value;
+    const cmd = $("appCommand").value;
     if (cmd) b.run = cmd;
   } else if (act === "run") {
     const run = $("run").value.trim();
@@ -171,16 +288,6 @@ function onFormChange() {
   else state.buttons.set(state.selected, b);
   syncActionVisibility();
   scheduleApply();
-}
-
-// When an app is chosen, helpfully fill the label and icon if still blank.
-function onAppPicked() {
-  const opt = $("appSelect").selectedOptions[0];
-  if (opt && opt.value) {
-    if (!$("label").value.trim() && opt.dataset.name) $("label").value = opt.dataset.name;
-    if (!$("image").value.trim() && opt.dataset.icon) $("image").value = opt.dataset.icon;
-  }
-  onFormChange();
 }
 
 function collectConfig() {
@@ -251,7 +358,6 @@ async function load() {
   $("brightness").value = state.brightness;
   $("brightnessOut").textContent = `${state.brightness}%`;
 
-  buildAppOptions();
   buildGrid();
   selectKey(0);
   statusMsg(`Ready \u2014 ${state.apps.length} apps. Edits apply live.`, "ok");
@@ -261,7 +367,10 @@ function wire() {
   $("form").addEventListener("input", onFormChange);
   $("form").addEventListener("change", onFormChange);
   $("builtin").addEventListener("change", syncActionVisibility);
-  $("appSelect").addEventListener("change", onAppPicked);
+  $("appQuery").addEventListener("input", onAppInput);
+  $("appQuery").addEventListener("keydown", onAppKeydown);
+  $("appQuery").addEventListener("focus", onAppInput);
+  $("appQuery").addEventListener("blur", () => setTimeout(closeAppResults, 120));
   $("clearKey").addEventListener("click", clearKey);
   $("brightness").addEventListener("input", onBrightness);
 }

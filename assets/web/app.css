@@ -260,3 +260,51 @@ input[type="color"] {
 [hidden] {
   display: none !important;
 }
+
+/* App search combobox (fuzzy) */
+.combo {
+  position: relative;
+}
+.combo__input {
+  width: 100%;
+}
+.combo__results {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px;
+  max-height: 230px;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.combo__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+}
+.combo__option[aria-selected="true"],
+.combo__option:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.combo__icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+.combo__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.combo__empty {
+  padding: 6px 8px;
+  color: var(--muted);
+  font-style: italic;
+}

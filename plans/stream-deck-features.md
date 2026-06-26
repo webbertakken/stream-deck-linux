@@ -16,9 +16,9 @@ live (auto-refreshing) keys, toggle/multi-state keys, press visual feedback.
 - [x] Editor: built-in dropdown lists all of them (+ open target input)
 
 ## Phase B - Fuzzy app search (editor)
-- [ ] Replace app `<select>` with a searchable combobox: text filter + fuzzy
+- [x] Replace app `<select>` with a searchable combobox: text filter + fuzzy
       match + keyboard nav; auto-fills label/icon on pick
-- [ ] Verify via headless-Chrome screenshot
+- [x] Verify via headless-Chrome screenshot
 
 ## Phase C - Multi-page layouts
 - [ ] Config: `[[pages]]` (name + buttons); back-compat with top-level

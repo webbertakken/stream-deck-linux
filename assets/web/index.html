@@ -65,9 +65,21 @@
             <label class="radio"><input type="radio" name="act" value="run" /> Run command</label>
             <label class="radio"><input type="radio" name="act" value="builtin" /> Built-in</label>
 
-            <select id="appSelect" aria-label="Application" hidden>
-              <option value="">Choose an application…</option>
-            </select>
+            <div id="appSearch" class="combo" hidden>
+              <input
+                id="appQuery"
+                type="text"
+                class="combo__input"
+                placeholder="Search applications…"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="appResults"
+                aria-autocomplete="list"
+                autocomplete="off"
+              />
+              <input id="appCommand" type="hidden" />
+              <ul id="appResults" class="combo__results" role="listbox" hidden></ul>
+            </div>
             <input id="run" type="text" placeholder="e.g. alacritty" hidden />
             <div id="builtinRow" hidden>
               <select id="builtin" aria-label="Built-in action">

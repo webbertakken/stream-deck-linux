@@ -110,6 +110,7 @@ impl WebUi {
                 respond(request, 200, "text/css; charset=utf-8", APP_CSS.as_bytes())
             }
             (Method::Get, "/api/apps") => self.get_apps(request),
+            (Method::Get, "/api/icon") => self.get_icon(request, &url),
             (Method::Get, "/api/state") => self.get_state(request),
             (Method::Post, "/api/state") => self.post_state(request),
             (Method::Post, "/api/brightness") => self.post_brightness(request),
@@ -139,6 +140,23 @@ impl WebUi {
         let apps = crate::apps::list();
         let body = serde_json::to_vec(&apps).map_err(|e| Error::Web(e.to_string()))?;
         respond(request, 200, "application/json", &body)
+    }
+
+    /// Serve an application icon PNG by absolute path. Restricted to existing
+    /// `.png` files (the app list only ever yields resolved PNG icon paths).
+    fn get_icon(&self, request: Request, url: &str) -> Result<()> {
+        let path = url.split_once("path=").map(|(_, p)| percent_decode(p));
+        let Some(path) = path else {
+            return respond(request, 400, "text/plain", b"missing path");
+        };
+        let lower = path.to_ascii_lowercase();
+        if !lower.ends_with(".png") {
+            return respond(request, 400, "text/plain", b"only png icons");
+        }
+        match std::fs::read(&path) {
+            Ok(bytes) => respond(request, 200, "image/png", &bytes),
+            Err(_) => respond(request, 404, "text/plain", b"not found"),
+        }
     }
 
     fn get_state(&self, request: Request) -> Result<()> {
@@ -218,6 +236,37 @@ impl WebUi {
         let png = render::button_png(&self.model.image, &self.base_dir, &button)?;
         respond(request, 200, "image/png", &png)
     }
+}
+
+/// Minimal percent-decoder for a single query-string value.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hi = (bytes[i + 1] as char).to_digit(16);
+                let lo = (bytes[i + 2] as char).to_digit(16);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out.push((hi * 16 + lo) as u8);
+                    i += 3;
+                    continue;
+                }
+                out.push(b'%');
+                i += 1;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn respond(request: Request, status: u16, content_type: &str, body: &[u8]) -> Result<()> {
