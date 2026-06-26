@@ -6,6 +6,7 @@ const state = {
   brightness: 60,
   pages: [], // [{ name: string|null, buttons: Map<key, button> }]
   currentPage: 0,
+  pressFeedback: true,
   apps: [],
   selected: 0,
   appActive: -1,
@@ -455,6 +456,7 @@ function pageToObj(p) {
 
 function collectConfig() {
   const cfg = { brightness: state.brightness };
+  if (!state.pressFeedback) cfg.press_feedback = false;
   if (state.pages.length === 1 && !state.pages[0].name) {
     cfg.buttons = [...state.pages[0].buttons.values()]
       .filter(hasVisual)
@@ -516,6 +518,8 @@ async function load() {
   state.apps = await appsRes.json().catch(() => []);
   state.model = data.model;
   state.brightness = data.brightness ?? 60;
+  state.pressFeedback = data.press_feedback !== false;
+  $("pressFb").checked = state.pressFeedback;
   const pages = data.pages && data.pages.length ? data.pages : [{ name: null, buttons: [] }];
   state.pages = pages.map((p) => ({
     name: p.name || null,
@@ -547,6 +551,10 @@ function wire() {
     onFormChange();
   });
   $("brightness").addEventListener("input", onBrightness);
+  $("pressFb").addEventListener("change", () => {
+    state.pressFeedback = $("pressFb").checked;
+    applyNow();
+  });
 }
 
 wire();

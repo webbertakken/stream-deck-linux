@@ -32,6 +32,9 @@ pub struct Config {
     /// Display brightness percentage to apply on load (`0..=100`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brightness: Option<u8>,
+    /// Briefly highlight a key while it is pressed (default true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub press_feedback: Option<bool>,
     /// Single-page shorthand: the buttons of the one and only page. Mutually
     /// exclusive with `pages`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

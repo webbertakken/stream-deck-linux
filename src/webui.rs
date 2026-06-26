@@ -122,6 +122,7 @@ impl WebUi {
     fn load_config(&self) -> Config {
         let empty = Config {
             brightness: None,
+            press_feedback: None,
             buttons: Vec::new(),
             pages: Vec::new(),
         };
@@ -168,6 +169,7 @@ impl WebUi {
                 "keyCount": self.model.key_count,
             },
             "brightness": config.brightness,
+            "press_feedback": config.press_feedback,
             "pages": config.pages(),
         });
         let body = serde_json::to_vec(&state).map_err(|e| Error::Web(e.to_string()))?;

@@ -129,6 +129,7 @@ struct Session {
     actions: HashMap<u8, KeyAction>,
     live: Vec<LiveKey>,
     toggle_index: HashMap<u8, usize>,
+    press_feedback: bool,
     brightness: u8,
     previous: Vec<bool>,
     tools: crate::system::Tools,
@@ -157,6 +158,7 @@ impl Session {
             actions: HashMap::new(),
             live: Vec::new(),
             toggle_index: HashMap::new(),
+            press_feedback: config.press_feedback.unwrap_or(true),
             brightness,
             previous,
             tools: crate::system::detect_tools(),
@@ -200,6 +202,40 @@ impl Session {
             let surface = render::compose(&spec, &self.base_dir, &to_render);
             self.deck.set_key_image(button.key, &surface.encode()?)?;
         }
+        Ok(())
+    }
+
+    /// The effective button for a key on the current page (toggle-aware).
+    fn effective_button(&self, key: u8) -> Option<ButtonConfig> {
+        let button = self.pages[self.current_page]
+            .buttons
+            .iter()
+            .find(|b| b.key == key)?;
+        Some(match &button.states {
+            Some(states) if !states.is_empty() => {
+                let idx = self
+                    .toggle_index
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(0)
+                    .min(states.len() - 1);
+                states[idx].to_button(key)
+            }
+            _ => button.clone(),
+        })
+    }
+
+    /// Render a key, optionally with the pressed-key highlight.
+    fn render_key(&mut self, key: u8, highlight: bool) -> Result<()> {
+        let Some(button) = self.effective_button(key) else {
+            return Ok(());
+        };
+        let spec = self.deck.model().image;
+        let mut surface = render::compose(&spec, &self.base_dir, &button);
+        if highlight {
+            surface.brighten(0.3);
+        }
+        self.deck.set_key_image(key, &surface.encode()?)?;
         Ok(())
     }
 
@@ -371,8 +407,16 @@ impl Session {
         let events = diff_states(&self.previous, &states);
         self.previous = states;
         for event in events {
-            if event.kind != KeyEventKind::Pressed {
+            if event.kind == KeyEventKind::Released {
+                // Restore the key's normal visual when released.
+                if self.press_feedback {
+                    let _ = self.render_key(event.key, false);
+                }
                 continue;
+            }
+            // Pressed: flash the key first for tactile feedback.
+            if self.press_feedback {
+                let _ = self.render_key(event.key, true);
             }
             // Clone the action out so the borrow of `self.actions` is released
             // before we mutate other fields.

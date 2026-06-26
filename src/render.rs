@@ -73,6 +73,18 @@ impl KeySurface {
         draw_text_centered(&mut self.canvas, text, color, default_font());
     }
 
+    /// Blend every pixel toward white by `amount` (0..=1) for a pressed-key
+    /// highlight.
+    pub fn brighten(&mut self, amount: f32) {
+        let a = amount.clamp(0.0, 1.0);
+        for pixel in self.canvas.pixels_mut() {
+            for c in 0..3 {
+                let v = pixel.0[c] as f32;
+                pixel.0[c] = (v + (255.0 - v) * a).round() as u8;
+            }
+        }
+    }
+
     /// The upright composed canvas, before orientation/encoding. Useful for
     /// previews and tests.
     pub fn canvas(&self) -> &RgbImage {
@@ -274,6 +286,17 @@ mod tests {
         let mut canvas = RgbImage::from_pixel(72, 72, Rgb([10, 20, 30]));
         draw_text_centered(&mut canvas, "", [255, 255, 255], default_font());
         assert!(canvas.pixels().all(|p| p.0 == [10, 20, 30]));
+    }
+
+    #[test]
+    fn brighten_blends_toward_white() {
+        let mut surface = KeySurface::new(&Model::MK2.image);
+        surface.fill([0, 100, 254]);
+        surface.brighten(0.5);
+        let p = surface.canvas().get_pixel(0, 0).0;
+        assert_eq!(p[0], 128); // 0 + 255*0.5
+        assert_eq!(p[1], 178); // 100 + 155*0.5
+        assert_eq!(p[2], 255); // 254 + 1*0.5 -> 254.5 -> 255
     }
 
     #[test]

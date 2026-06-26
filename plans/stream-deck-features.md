@@ -45,7 +45,7 @@ live (auto-refreshing) keys, toggle/multi-state keys, press visual feedback.
 - [x] Editor: states editor (add / remove)
 
 ## Phase G - Press visual feedback
-- [ ] Runtime: briefly highlight the pressed key, restore on release (pure
+- [x] Runtime: briefly highlight the pressed key, restore on release (pure
       transform tested); config opt-out `press_feedback = false`
 
 ## Phase H - Verify + docs
