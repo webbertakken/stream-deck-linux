@@ -74,6 +74,9 @@ pub struct ButtonConfig {
     /// `brightness_up`, `brightness_down`, `brightness_set:70`, `reset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builtin: Option<String>,
+    /// A sequence of shell commands run in order on press.
+    #[serde(default, rename = "macro", skip_serializing_if = "Option::is_none")]
+    pub macro_steps: Option<Vec<String>>,
     /// Optional text label drawn centred on the key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -184,11 +187,27 @@ fn validate_buttons(
         let _ = button.rgb()?;
         let _ = button.text_rgb()?;
 
-        if button.run.is_some() && button.builtin.is_some() {
+        let action_count = [
+            button.run.is_some(),
+            button.builtin.is_some(),
+            button.macro_steps.is_some(),
+        ]
+        .iter()
+        .filter(|set| **set)
+        .count();
+        if action_count > 1 {
             return Err(Error::ConfigInvalid(format!(
-                "key {} sets both run and builtin (choose one)",
+                "key {} sets more than one action (run/builtin/macro)",
                 button.key
             )));
+        }
+        if let Some(steps) = &button.macro_steps {
+            if steps.iter().all(|s| s.trim().is_empty()) {
+                return Err(Error::ConfigInvalid(format!(
+                    "key {} macro has no steps",
+                    button.key
+                )));
+            }
         }
         if let Some(spec) = &button.builtin {
             let builtin = Builtin::parse(spec)?;
@@ -364,7 +383,38 @@ run = "amixer set Master toggle"
         )
         .unwrap();
         let err = config.validate(&Model::MK2).unwrap_err();
-        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("both run and builtin")));
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("more than one action")));
+    }
+
+    #[test]
+    fn validate_accepts_macro() {
+        let toml = "[[buttons]]\nkey = 0\nlabel = \"Macro\"\nmacro = [\"echo a\", \"echo b\"]\n";
+        let config = Config::from_toml_str(toml).unwrap();
+        assert!(config.validate(&Model::MK2).is_ok());
+        assert_eq!(
+            config.buttons[0].macro_steps.as_deref(),
+            Some(["echo a".to_string(), "echo b".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn validate_rejects_macro_with_run() {
+        let toml = "[[buttons]]\nkey = 0\nlabel = \"x\"\nrun = \"true\"\nmacro = [\"echo a\"]\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("more than one action")));
+    }
+
+    #[test]
+    fn validate_rejects_empty_macro() {
+        let toml = "[[buttons]]\nkey = 0\nlabel = \"x\"\nmacro = [\"  \"]\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("macro has no steps")));
     }
 
     #[test]

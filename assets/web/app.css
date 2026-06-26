@@ -338,3 +338,14 @@ input[type="color"] {
 .tab:hover {
   border-color: var(--muted);
 }
+
+textarea#macro {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}

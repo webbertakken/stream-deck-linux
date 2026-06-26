@@ -22,7 +22,13 @@ function statusMsg(text, kind) {
 function isEmpty(b) {
   return (
     !b ||
-    (!b.image && !b.color && !b.label && !b.run && !b.builtin && !b.text_color)
+    (!b.image &&
+      !b.color &&
+      !b.label &&
+      !b.run &&
+      !b.builtin &&
+      !b.text_color &&
+      !(b.macro && b.macro.length))
   );
 }
 
@@ -149,11 +155,13 @@ function populateForm(b) {
   let act = "none";
   if (b.run && b.run.startsWith("gtk-launch ")) act = "openapp";
   else if (b.run) act = "run";
+  else if (b.macro && b.macro.length) act = "macro";
   else if (b.builtin) act = "builtin";
   document.querySelectorAll('input[name="act"]').forEach((r) => {
     r.checked = r.value === act;
   });
   $("run").value = b.run || "";
+  $("macro").value = (b.macro || []).join("\n");
   if (act === "openapp") {
     $("appCommand").value = b.run || "";
     const found = state.apps.find((a) => a.command === b.run);
@@ -198,6 +206,7 @@ function syncActionVisibility() {
   $("appSearch").hidden = act !== "openapp";
   if (act !== "openapp") closeAppResults();
   $("run").hidden = act !== "run";
+  $("macro").hidden = act !== "macro";
   $("builtinRow").hidden = act !== "builtin";
   const sel = $("builtin").value;
   $("builtinValue").hidden = !(sel === "brightness_set");
@@ -222,6 +231,12 @@ function readForm() {
   } else if (act === "run") {
     const run = $("run").value.trim();
     if (run) b.run = run;
+  } else if (act === "macro") {
+    const steps = $("macro")
+      .value.split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (steps.length) b.macro = steps;
   } else if (act === "builtin") {
     const sel = $("builtin").value;
     if (sel === "brightness_set") {

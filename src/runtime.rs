@@ -29,6 +29,8 @@ pub fn action_map(buttons: &[ButtonConfig]) -> Result<HashMap<u8, KeyAction>> {
             map.insert(button.key, KeyAction::Run(run.clone()));
         } else if let Some(spec) = &button.builtin {
             map.insert(button.key, KeyAction::Builtin(Builtin::parse(spec)?));
+        } else if let Some(steps) = &button.macro_steps {
+            map.insert(button.key, KeyAction::Macro(steps.clone()));
         }
     }
     Ok(map)
@@ -252,6 +254,14 @@ impl Session {
                     println!("key {} pressed -> builtin {builtin:?}", event.key);
                     if let Err(err) = self.run_builtin(&builtin) {
                         eprintln!("error: builtin {builtin:?} failed: {err}");
+                    }
+                }
+                Some(KeyAction::Macro(steps)) => {
+                    println!("key {} pressed -> macro ({} steps)", event.key, steps.len());
+                    // Run the steps in order inside one detached shell.
+                    let script = steps.join("\n");
+                    if let Err(err) = spawn(&script) {
+                        eprintln!("error: macro failed: {err}");
                     }
                 }
                 None => {}

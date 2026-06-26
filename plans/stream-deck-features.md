@@ -28,9 +28,9 @@ live (auto-refreshing) keys, toggle/multi-state keys, press visual feedback.
 - [x] Editor: page tabs (switch / add / rename / delete)
 
 ## Phase D - Macro keys (run a sequence)
-- [ ] Config: `macro = ["cmd1", "cmd2"]`; mutually exclusive w/ run/builtin
-- [ ] Runtime: run commands sequentially on press (+ tests)
-- [ ] Editor: macro field (multi-line)
+- [x] Config: `macro = ["cmd1", "cmd2"]`; mutually exclusive w/ run/builtin
+- [x] Runtime: run commands sequentially on press (+ tests)
+- [x] Editor: macro field (multi-line)
 
 ## Phase E - Live (auto-refreshing) keys
 - [ ] Config: `watch = "<command>"` + `interval = <secs>`; stdout -> label

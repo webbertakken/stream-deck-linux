@@ -101,6 +101,8 @@ pub enum KeyAction {
     Run(String),
     /// Trigger a device-native action.
     Builtin(Builtin),
+    /// Run a sequence of shell commands in order.
+    Macro(Vec<String>),
 }
 
 #[cfg(test)]
