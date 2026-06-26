@@ -49,7 +49,7 @@ live (auto-refreshing) keys, toggle/multi-state keys, press visual feedback.
       transform tested); config opt-out `press_feedback = false`
 
 ## Phase H - Verify + docs
-- [ ] fmt + clippy -D warnings + full test suite green
-- [ ] Hardware verification on the MK.2 (each feature)
-- [ ] README/docs updated
-- [ ] Commit per phase
+- [x] fmt + clippy -D warnings + full test suite green
+- [x] Hardware verification on the MK.2 (each feature)
+- [x] README/docs updated
+- [x] Commit per phase

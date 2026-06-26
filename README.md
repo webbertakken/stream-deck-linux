@@ -15,12 +15,15 @@ HID report descriptor, not guessed.
 
 - Per-key **pictures** (PNG/JPEG, auto-resized), **solid colours**, and
   **centred text labels** (with a bundled font), or any combination.
-- Per-key **functions**: run a shell command, or a device **built-in**
-  (brightness up/down/set, reset).
+- Per-key **functions**: run a shell command, a **macro** (command sequence),
+  or a device **built-in** (brightness, media, volume, open, page switch).
+- **Multi-page layouts**, **toggle / multi-state keys**, and **live keys**
+  whose label is refreshed from a command (clock, stats, ...).
+- **Press feedback**: keys highlight while held.
 - A single **TOML config** describes the whole layout.
 - A **system tray** (StatusNotifierItem) with quick actions and a daemon.
-- A **web-based editor**: click the 5x3 grid, set each key's picture and
-  action, and changes apply to the device live.
+- A **web-based editor**: page tabs, **fuzzy application search**, toggle
+  states, live + macro keys; changes apply to the device live.
 - **Autostart on login** via a freedesktop `.desktop` entry.
 - A handful of one-shot CLI commands for quick tweaks and scripting.
 
@@ -135,22 +138,40 @@ builtin = "brightness_up"   # device-native action instead of `run`
 | `label`      | Centred text, auto-shrunk to fit; drawn over the background.   |
 | `text_color` | Label colour `#RRGGBB` (default white).                        |
 | `run`        | Shell command executed on press.                               |
-| `builtin`    | Device-native action on press (mutually exclusive with `run`). |
+| `builtin`    | Device-native action on press.                                 |
+| `macro`      | Array of shell commands run in order on press.                 |
+| `watch`      | Command whose stdout becomes the key label (a live key).       |
+| `interval`   | Refresh seconds for `watch` (default 5).                       |
+| `states`     | Toggle key: states cycled on press (each w/ visual + action).  |
 
-A key needs at least one of `image`, `color`, or `label`.
+Exactly one action per key (`run` / `builtin` / `macro` / `states`); a key
+needs at least one of `image`, `color`, `label` or `watch`. Top-level options:
+`brightness` (0-100) and `press_feedback` (highlight a key while pressed,
+default true).
 
 ### Built-in actions
 
-| `builtin` value         | Effect                                |
-| ----------------------- | ------------------------------------- |
-| `brightness_up`         | Increase brightness by 10%.           |
-| `brightness_down`       | Decrease brightness by 10%.           |
-| `brightness_set:N`      | Set brightness to `N`% (0-100).       |
-| `reset`                 | Reset device to its standby logo.     |
+| `builtin` value      | Effect                                  |
+| -------------------- | --------------------------------------- |
+| `brightness_up/down` | Adjust brightness by 10%.               |
+| `brightness_max/min` | Brightness to 100% / 0%.                |
+| `brightness_set:N`   | Set brightness to `N`% (0-100).         |
+| `media_play_pause`   | Play / pause (via `playerctl`).         |
+| `media_next/prev`    | Next / previous track.                  |
+| `volume_up/down`     | Volume +/- (wpctl / pactl / amixer).    |
+| `volume_mute`        | Toggle mute.                            |
+| `open:<url\|file>`   | Open with the desktop default handler.  |
+| `page_next/prev`     | Switch pages (wraps).                   |
+| `page:<name\|index>` | Switch to a specific page.              |
+| `reset`              | Reset device to its standby logo.       |
 
-Everything else (media keys, volume, hotkeys, launching apps) is a `run`
-command, e.g. `playerctl play-pause`, `wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle`,
-or `ydotool key 29:1 46:1 46:0 29:0`.
+### Pages, macros, live keys and toggles
+
+Use `[[pages]]` (each with a `name` + `buttons`) for multi-page layouts; switch
+with the `page_*` built-ins. A `macro` runs a command sequence; a `watch` key
+shows live command output; `states` makes a toggle. See
+`examples/showcase.toml` and `examples/multipage.toml`. The web editor supports
+all of this: page tabs, fuzzy app search, toggle states, live and macro keys.
 
 ## How it works
 

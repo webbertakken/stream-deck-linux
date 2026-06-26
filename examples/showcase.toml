@@ -1,0 +1,61 @@
+# Showcase of the newer features: pages, live keys, toggles, macros, built-ins.
+brightness = 70
+
+[[pages]]
+name = "main"
+
+# Live key: a clock refreshed every second.
+[[pages.buttons]]
+key = 0
+color = "#11111b"
+text_color = "#a6e3a1"
+watch = "date +%H:%M:%S"
+interval = 1
+
+# Toggle key: two states cycled on each press.
+[[pages.buttons]]
+key = 1
+[[pages.buttons.states]]
+label = "Mic"
+color = "#40a02b"
+run = "echo mic on"
+[[pages.buttons.states]]
+label = "Muted"
+color = "#e64553"
+run = "echo mic off"
+
+# Macro key: runs several commands in order.
+[[pages.buttons]]
+key = 2
+color = "#fe640b"
+label = "Build"
+macro = ["echo step 1", "echo step 2"]
+
+# Built-in: volume up.
+[[pages.buttons]]
+key = 3
+color = "#1e66f5"
+label = "Vol +"
+builtin = "volume_up"
+
+# Page navigation.
+[[pages.buttons]]
+key = 4
+color = "#6c6f85"
+label = "Tools >"
+builtin = "page:tools"
+
+[[pages]]
+name = "tools"
+
+[[pages.buttons]]
+key = 0
+color = "#df8e1d"
+label = "Bright+"
+builtin = "brightness_up"
+
+[[pages.buttons]]
+key = 4
+color = "#6c6f85"
+label = "< Back"
+builtin = "page:main"
