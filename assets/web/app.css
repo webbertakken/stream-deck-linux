@@ -349,3 +349,5 @@ textarea#macro {
   font: inherit;
   resize: vertical;
 }
+
+.num { width: 90px; }

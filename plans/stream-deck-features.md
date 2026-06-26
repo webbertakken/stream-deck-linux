@@ -33,10 +33,10 @@ live (auto-refreshing) keys, toggle/multi-state keys, press visual feedback.
 - [x] Editor: macro field (multi-line)
 
 ## Phase E - Live (auto-refreshing) keys
-- [ ] Config: `watch = "<command>"` + `interval = <secs>`; stdout -> label
-- [ ] Runtime: periodic refresh re-renders the key label (+ tests on the
+- [x] Config: `watch = "<command>"` + `interval = <secs>`; stdout -> label
+- [x] Runtime: periodic refresh re-renders the key label (+ tests on the
       output->label transform)
-- [ ] Editor: watch + interval fields
+- [x] Editor: watch + interval fields
 
 ## Phase F - Toggle / multi-state keys
 - [ ] Config: `states = [{ label, color, image, text_color, run|builtin }]`

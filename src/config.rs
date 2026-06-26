@@ -83,6 +83,13 @@ pub struct ButtonConfig {
     /// Colour of the label text as `#RRGGBB` (defaults to white).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_color: Option<String>,
+    /// Shell command whose stdout becomes the key's label, refreshed every
+    /// [`Self::interval`] seconds (a "live" key, e.g. a clock or CPU meter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch: Option<String>,
+    /// Refresh interval in seconds for `watch` (default 5, minimum 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval: Option<u64>,
 }
 
 impl Config {
@@ -177,9 +184,13 @@ fn validate_buttons(
         }
         *slot = true;
 
-        if button.image.is_none() && button.color.is_none() && button.label.is_none() {
+        if button.image.is_none()
+            && button.color.is_none()
+            && button.label.is_none()
+            && button.watch.is_none()
+        {
             return Err(Error::ConfigInvalid(format!(
-                "key {} has no image, color or label",
+                "key {} has no image, color, label or watch",
                 button.key
             )));
         }
@@ -355,7 +366,16 @@ run = "amixer set Master toggle"
     fn validate_rejects_button_without_visual() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 2\nrun = \"true\"\n").unwrap();
         let err = config.validate(&Model::MK2).unwrap_err();
-        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color or label")));
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color")));
+    }
+
+    #[test]
+    fn validate_accepts_watch_as_visual() {
+        let toml = "[[buttons]]\nkey = 0\nwatch = \"date +%H:%M\"\ninterval = 60\n";
+        let config = Config::from_toml_str(toml).unwrap();
+        assert!(config.validate(&Model::MK2).is_ok());
+        assert_eq!(config.buttons[0].watch.as_deref(), Some("date +%H:%M"));
+        assert_eq!(config.buttons[0].interval, Some(60));
     }
 
     #[test]

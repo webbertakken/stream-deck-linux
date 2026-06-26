@@ -28,12 +28,13 @@ function isEmpty(b) {
       !b.run &&
       !b.builtin &&
       !b.text_color &&
+      !b.watch &&
       !(b.macro && b.macro.length))
   );
 }
 
 function hasVisual(b) {
-  return !!(b && (b.image || b.color || b.label));
+  return !!(b && (b.image || b.color || b.label || b.watch));
 }
 
 function currentButtons() {
@@ -151,6 +152,8 @@ function populateForm(b) {
   $("useColor").checked = !!b.color;
   $("color").value = b.color || "#1e1e2e";
   $("image").value = b.image || "";
+  $("watch").value = b.watch || "";
+  $("interval").value = b.interval || 5;
 
   let act = "none";
   if (b.run && b.run.startsWith("gtk-launch ")) act = "openapp";
@@ -223,6 +226,12 @@ function readForm() {
   if ($("useColor").checked) b.color = $("color").value;
   const image = $("image").value.trim();
   if (image) b.image = image;
+  const watch = $("watch").value.trim();
+  if (watch) {
+    b.watch = watch;
+    const iv = parseInt($("interval").value, 10);
+    if (iv >= 1) b.interval = iv;
+  }
 
   const act = currentAction();
   if (act === "openapp") {

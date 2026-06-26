@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::actions::{Builtin, KeyAction, BRIGHTNESS_STEP};
 use crate::config::{ButtonConfig, Config, Page};
@@ -16,6 +16,47 @@ use crate::render;
 
 /// Brightness assumed when the config does not specify one (for up/down steps).
 const DEFAULT_BRIGHTNESS: u8 = 50;
+
+/// Default refresh interval (seconds) for a live (`watch`) key.
+const DEFAULT_WATCH_INTERVAL: u64 = 5;
+
+/// Maximum characters of command output used as a live key's label.
+const MAX_LIVE_LABEL: usize = 24;
+
+/// A live key: its config plus the command to refresh its label.
+struct LiveKey {
+    button: ButtonConfig,
+    command: String,
+    interval: Duration,
+    next_due: Instant,
+}
+
+/// First non-empty line of command output, trimmed and length-capped, used as
+/// a live key's label.
+fn label_from_output(stdout: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stdout);
+    let line = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    line.chars().take(MAX_LIVE_LABEL).collect()
+}
+
+/// Collect the live (`watch`) keys from a page's buttons.
+fn collect_live(buttons: &[ButtonConfig]) -> Vec<LiveKey> {
+    buttons
+        .iter()
+        .filter_map(|b| {
+            b.watch.as_ref().map(|cmd| LiveKey {
+                button: b.clone(),
+                command: cmd.clone(),
+                interval: Duration::from_secs(b.interval.unwrap_or(DEFAULT_WATCH_INTERVAL).max(1)),
+                next_due: Instant::now(),
+            })
+        })
+        .collect()
+}
 
 /// How long each button read blocks before re-checking the shutdown flag.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -60,6 +101,21 @@ fn spawn(command: &str) -> std::io::Result<Child> {
     Command::new("sh").arg("-c").arg(command).spawn()
 }
 
+/// Reap any finished detached children so they don't linger as zombies.
+///
+/// We deliberately do NOT set `SIGCHLD` to `SIG_IGN` (that would make
+/// `Command::output()` for live keys fail with `ECHILD`); instead we sweep
+/// finished children non-blockingly each loop tick.
+fn reap_zombies() {
+    loop {
+        let mut status = 0;
+        let pid = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
+        if pid <= 0 {
+            break;
+        }
+    }
+}
+
 /// A command sent to the running daemon (e.g. from a tray menu).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
@@ -81,6 +137,7 @@ struct Session {
     pages: Vec<Page>,
     current_page: usize,
     actions: HashMap<u8, KeyAction>,
+    live: Vec<LiveKey>,
     brightness: u8,
     previous: Vec<bool>,
     tools: crate::system::Tools,
@@ -107,6 +164,7 @@ impl Session {
             pages: config.pages(),
             current_page: 0,
             actions: HashMap::new(),
+            live: Vec::new(),
             brightness,
             previous,
             tools: crate::system::detect_tools(),
@@ -124,6 +182,39 @@ impl Session {
         let buttons = self.pages[self.current_page].buttons.clone();
         render_page(&mut self.deck, &buttons, &self.base_dir)?;
         self.actions = action_map(&buttons)?;
+        self.live = collect_live(&buttons);
+        Ok(())
+    }
+
+    /// Refresh any live keys whose interval has elapsed.
+    fn tick_live(&mut self) -> Result<()> {
+        if self.live.is_empty() {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let due: Vec<usize> = self
+            .live
+            .iter()
+            .enumerate()
+            .filter(|(_, lk)| now >= lk.next_due)
+            .map(|(i, _)| i)
+            .collect();
+        for i in due {
+            let command = self.live[i].command.clone();
+            let label = match Command::new("sh").arg("-c").arg(&command).output() {
+                Ok(out) => label_from_output(&out.stdout),
+                Err(err) => {
+                    eprintln!("error: watch '{command}' failed: {err}");
+                    String::new()
+                }
+            };
+            let mut button = self.live[i].button.clone();
+            button.label = Some(label);
+            let spec = self.deck.model().image;
+            let surface = render::compose(&spec, &self.base_dir, &button);
+            self.deck.set_key_image(button.key, &surface.encode()?)?;
+            self.live[i].next_due = now + self.live[i].interval;
+        }
         Ok(())
     }
 
@@ -279,11 +370,6 @@ pub fn run_with_control(
     shutdown: &AtomicBool,
     control: &Receiver<Control>,
 ) -> Result<()> {
-    // Auto-reap launched processes so the daemon never accumulates zombies.
-    unsafe {
-        libc::signal(libc::SIGCHLD, libc::SIG_IGN);
-    }
-
     let mut session = Session::load(deck, config_path)?;
     println!("Running with {} mapped action(s).", session.actions.len());
 
@@ -301,6 +387,8 @@ pub fn run_with_control(
             break;
         }
         session.poll()?;
+        session.tick_live()?;
+        reap_zombies();
     }
 
     let _ = session.deck.clear_all();
@@ -330,6 +418,14 @@ mod tests {
             Some(&KeyAction::Builtin(Builtin::BrightnessUp))
         );
         assert!(!actions.contains_key(&3));
+    }
+
+    #[test]
+    fn label_from_output_takes_first_nonempty_line_capped() {
+        assert_eq!(label_from_output(b"\n  12:45 \nsecond\n"), "12:45");
+        assert_eq!(label_from_output(b""), "");
+        let long = label_from_output(b"abcdefghijklmnopqrstuvwxyz0123456789");
+        assert_eq!(long.chars().count(), MAX_LIVE_LABEL);
     }
 
     #[test]

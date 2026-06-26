@@ -60,6 +60,16 @@
             <input id="image" type="text" placeholder="/path/to/icon.png or ~/pics/x.png" />
           </div>
 
+          <div class="field">
+            <label for="watch">Live label command</label>
+            <input id="watch" type="text" placeholder="e.g. date +%H:%M (output becomes the label)" />
+          </div>
+
+          <div class="field field--row">
+            <label for="interval">Refresh every (s)</label>
+            <input id="interval" type="number" min="1" max="3600" value="5" class="num" />
+          </div>
+
           <fieldset class="field action">
             <legend>Action</legend>
             <label class="radio"><input type="radio" name="act" value="none" /> None</label>
