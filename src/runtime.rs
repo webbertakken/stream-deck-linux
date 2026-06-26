@@ -72,21 +72,11 @@ pub fn action_map(buttons: &[ButtonConfig]) -> Result<HashMap<u8, KeyAction>> {
             map.insert(button.key, KeyAction::Builtin(Builtin::parse(spec)?));
         } else if let Some(steps) = &button.macro_steps {
             map.insert(button.key, KeyAction::Macro(steps.clone()));
+        } else if let Some(states) = &button.states {
+            map.insert(button.key, KeyAction::Toggle(states.clone()));
         }
     }
     Ok(map)
-}
-
-/// Render a page's buttons onto the device. Unconfigured keys are blanked.
-/// Image-load failures fall back to the key's colour or an error tile.
-fn render_page(deck: &mut StreamDeck, buttons: &[ButtonConfig], base_dir: &Path) -> Result<()> {
-    deck.clear_all()?;
-    let spec = deck.model().image;
-    for button in buttons {
-        let surface = render::compose(&spec, base_dir, button);
-        deck.set_key_image(button.key, &surface.encode()?)?;
-    }
-    Ok(())
 }
 
 /// Where a page switch should land.
@@ -138,6 +128,7 @@ struct Session {
     current_page: usize,
     actions: HashMap<u8, KeyAction>,
     live: Vec<LiveKey>,
+    toggle_index: HashMap<u8, usize>,
     brightness: u8,
     previous: Vec<bool>,
     tools: crate::system::Tools,
@@ -165,6 +156,7 @@ impl Session {
             current_page: 0,
             actions: HashMap::new(),
             live: Vec::new(),
+            toggle_index: HashMap::new(),
             brightness,
             previous,
             tools: crate::system::detect_tools(),
@@ -180,9 +172,59 @@ impl Session {
         }
         self.current_page = index.min(self.pages.len() - 1);
         let buttons = self.pages[self.current_page].buttons.clone();
-        render_page(&mut self.deck, &buttons, &self.base_dir)?;
         self.actions = action_map(&buttons)?;
         self.live = collect_live(&buttons);
+        self.toggle_index.clear();
+        self.render_current()?;
+        Ok(())
+    }
+
+    /// Render the current page, honouring each toggle key's current state.
+    fn render_current(&mut self) -> Result<()> {
+        self.deck.clear_all()?;
+        let spec = self.deck.model().image;
+        let buttons = self.pages[self.current_page].buttons.clone();
+        for button in &buttons {
+            let to_render = match &button.states {
+                Some(states) if !states.is_empty() => {
+                    let idx = self
+                        .toggle_index
+                        .get(&button.key)
+                        .copied()
+                        .unwrap_or(0)
+                        .min(states.len() - 1);
+                    states[idx].to_button(button.key)
+                }
+                _ => button.clone(),
+            };
+            let surface = render::compose(&spec, &self.base_dir, &to_render);
+            self.deck.set_key_image(button.key, &surface.encode()?)?;
+        }
+        Ok(())
+    }
+
+    /// Advance a toggle key to its next state, render it, and run its action.
+    fn toggle_key(&mut self, key: u8, states: &[crate::config::ButtonState]) -> Result<()> {
+        if states.is_empty() {
+            return Ok(());
+        }
+        let slot = self.toggle_index.entry(key).or_insert(0);
+        *slot = (*slot + 1) % states.len();
+        let index = *slot;
+        let state = states[index].clone();
+        println!("key {key} toggle -> state {index}");
+
+        let to_render = state.to_button(key);
+        let spec = self.deck.model().image;
+        let surface = render::compose(&spec, &self.base_dir, &to_render);
+        self.deck.set_key_image(key, &surface.encode()?)?;
+
+        if let Some(run) = &state.run {
+            self.spawn_command(run);
+        } else if let Some(spec) = &state.builtin {
+            let builtin = Builtin::parse(spec)?;
+            self.run_builtin(&builtin)?;
+        }
         Ok(())
     }
 
@@ -353,6 +395,11 @@ impl Session {
                     let script = steps.join("\n");
                     if let Err(err) = spawn(&script) {
                         eprintln!("error: macro failed: {err}");
+                    }
+                }
+                Some(KeyAction::Toggle(states)) => {
+                    if let Err(err) = self.toggle_key(event.key, &states) {
+                        eprintln!("error: toggle failed: {err}");
                     }
                 }
                 None => {}

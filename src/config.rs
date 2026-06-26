@@ -90,6 +90,45 @@ pub struct ButtonConfig {
     /// Refresh interval in seconds for `watch` (default 5, minimum 1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval: Option<u64>,
+    /// Toggle key: a list of states cycled on each press, each with its own
+    /// visual and action. Mutually exclusive with run/builtin/macro.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub states: Option<Vec<ButtonState>>,
+}
+
+/// One state of a toggle key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ButtonState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin: Option<String>,
+}
+
+impl ButtonState {
+    /// Build a plain [`ButtonConfig`] for this state on `key`, for rendering /
+    /// dispatch / validation reuse.
+    pub fn to_button(&self, key: u8) -> ButtonConfig {
+        ButtonConfig {
+            key,
+            image: self.image.clone(),
+            color: self.color.clone(),
+            label: self.label.clone(),
+            text_color: self.text_color.clone(),
+            run: self.run.clone(),
+            builtin: self.builtin.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Config {
@@ -184,51 +223,74 @@ fn validate_buttons(
         }
         *slot = true;
 
-        if button.image.is_none()
-            && button.color.is_none()
-            && button.label.is_none()
-            && button.watch.is_none()
-        {
-            return Err(Error::ConfigInvalid(format!(
-                "key {} has no image, color, label or watch",
-                button.key
-            )));
-        }
-        // Surface bad colours at validation time, not mid-render.
-        let _ = button.rgb()?;
-        let _ = button.text_rgb()?;
-
-        let action_count = [
-            button.run.is_some(),
-            button.builtin.is_some(),
-            button.macro_steps.is_some(),
-        ]
-        .iter()
-        .filter(|set| **set)
-        .count();
-        if action_count > 1 {
-            return Err(Error::ConfigInvalid(format!(
-                "key {} sets more than one action (run/builtin/macro)",
-                button.key
-            )));
-        }
-        if let Some(steps) = &button.macro_steps {
-            if steps.iter().all(|s| s.trim().is_empty()) {
+        if let Some(states) = &button.states {
+            if states.is_empty() {
                 return Err(Error::ConfigInvalid(format!(
-                    "key {} macro has no steps",
+                    "key {} has no states",
                     button.key
                 )));
             }
+            if button.run.is_some() || button.builtin.is_some() || button.macro_steps.is_some() {
+                return Err(Error::ConfigInvalid(format!(
+                    "key {} sets both states and another action",
+                    button.key
+                )));
+            }
+            for state in states {
+                validate_one(&state.to_button(button.key), page_count, names)?;
+            }
+        } else {
+            validate_one(button, page_count, names)?;
         }
-        if let Some(spec) = &button.builtin {
-            let builtin = Builtin::parse(spec)?;
-            if let Builtin::Page(target) = &builtin {
-                if resolve_page_target(target, page_count, names).is_none() {
-                    return Err(Error::ConfigInvalid(format!(
-                        "key {} targets unknown page '{target}'",
-                        button.key
-                    )));
-                }
+    }
+    Ok(())
+}
+
+/// Validate a single button's visual + action (shared by plain buttons and
+/// toggle states).
+fn validate_one(button: &ButtonConfig, page_count: usize, names: &[Option<String>]) -> Result<()> {
+    if button.image.is_none()
+        && button.color.is_none()
+        && button.label.is_none()
+        && button.watch.is_none()
+    {
+        return Err(Error::ConfigInvalid(format!(
+            "key {} has no image, color, label or watch",
+            button.key
+        )));
+    }
+    let _ = button.rgb()?;
+    let _ = button.text_rgb()?;
+
+    let action_count = [
+        button.run.is_some(),
+        button.builtin.is_some(),
+        button.macro_steps.is_some(),
+    ]
+    .iter()
+    .filter(|set| **set)
+    .count();
+    if action_count > 1 {
+        return Err(Error::ConfigInvalid(format!(
+            "key {} sets more than one action (run/builtin/macro)",
+            button.key
+        )));
+    }
+    if let Some(steps) = &button.macro_steps {
+        if steps.iter().all(|s| s.trim().is_empty()) {
+            return Err(Error::ConfigInvalid(format!(
+                "key {} macro has no steps",
+                button.key
+            )));
+        }
+    }
+    if let Some(spec) = &button.builtin {
+        if let Builtin::Page(target) = Builtin::parse(spec)? {
+            if resolve_page_target(&target, page_count, names).is_none() {
+                return Err(Error::ConfigInvalid(format!(
+                    "key {} targets unknown page '{target}'",
+                    button.key
+                )));
             }
         }
     }
@@ -367,6 +429,46 @@ run = "amixer set Master toggle"
         let config = Config::from_toml_str("[[buttons]]\nkey = 2\nrun = \"true\"\n").unwrap();
         let err = config.validate(&Model::MK2).unwrap_err();
         assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color")));
+    }
+
+    #[test]
+    fn validate_accepts_toggle_states() {
+        let toml = "[[buttons]]\nkey = 0\n[[buttons.states]]\nlabel = \"On\"\ncolor = \"#40a02b\"\nrun = \"echo on\"\n[[buttons.states]]\nlabel = \"Off\"\ncolor = \"#e64553\"\nrun = \"echo off\"\n";
+        let config = Config::from_toml_str(toml).unwrap();
+        assert!(config.validate(&Model::MK2).is_ok());
+        assert_eq!(config.buttons[0].states.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn validate_rejects_empty_states() {
+        let toml = "[[buttons]]\nkey = 0\nstates = []\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no states")));
+    }
+
+    #[test]
+    fn validate_rejects_state_without_visual() {
+        let toml = "[[buttons]]\nkey = 0\n[[buttons.states]]\nrun = \"echo x\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color")));
+    }
+
+    #[test]
+    fn validate_rejects_states_with_run() {
+        let toml = "[[buttons]]\nkey = 0\nrun = \"x\"\n[[buttons.states]]\nlabel = \"A\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::ConfigInvalid(m) if m.contains("both states and another action"))
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! command cannot reach. Shell commands cover everything else (launch apps,
 //! `playerctl`, `wpctl`, `ydotool`, ...).
 
+use crate::config::ButtonState;
 use crate::error::{Error, Result};
 use crate::system::{Media, Volume};
 
@@ -103,6 +104,8 @@ pub enum KeyAction {
     Builtin(Builtin),
     /// Run a sequence of shell commands in order.
     Macro(Vec<String>),
+    /// Cycle through states on each press (toggle / multi-state key).
+    Toggle(Vec<ButtonState>),
 }
 
 #[cfg(test)]

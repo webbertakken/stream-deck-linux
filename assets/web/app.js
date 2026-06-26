@@ -29,12 +29,64 @@ function isEmpty(b) {
       !b.builtin &&
       !b.text_color &&
       !b.watch &&
-      !(b.macro && b.macro.length))
+      !(b.macro && b.macro.length) &&
+      !(b.states && b.states.length))
   );
 }
 
 function hasVisual(b) {
-  return !!(b && (b.image || b.color || b.label || b.watch));
+  return !!(
+    b &&
+    (b.image || b.color || b.label || b.watch || (b.states && b.states.length))
+  );
+}
+
+// ---- Toggle states editor ----
+function renderStates(states) {
+  const list = $("statesList");
+  list.innerHTML = "";
+  (states && states.length ? states : [{ color: "#40a02b" }]).forEach((s) => addStateRow(s));
+}
+
+function addStateRow(s) {
+  const row = document.createElement("div");
+  row.className = "state-row";
+  const label = document.createElement("input");
+  label.type = "text";
+  label.className = "state-label";
+  label.placeholder = "label";
+  label.value = (s && s.label) || "";
+  const color = document.createElement("input");
+  color.type = "color";
+  color.className = "state-color";
+  color.value = (s && s.color) || "#1e1e2e";
+  const run = document.createElement("input");
+  run.type = "text";
+  run.className = "state-run";
+  run.placeholder = "command (optional)";
+  run.value = (s && s.run) || "";
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "state-del";
+  del.textContent = "\u2715";
+  del.title = "Remove state";
+  del.addEventListener("click", () => {
+    row.remove();
+    onFormChange();
+  });
+  row.append(label, color, run, del);
+  $("statesList").appendChild(row);
+}
+
+function collectStates() {
+  return [...document.querySelectorAll("#statesList .state-row")].map((row) => {
+    const state = { color: row.querySelector(".state-color").value };
+    const label = row.querySelector(".state-label").value.trim();
+    if (label) state.label = label;
+    const run = row.querySelector(".state-run").value.trim();
+    if (run) state.run = run;
+    return state;
+  });
 }
 
 function currentButtons() {
@@ -159,12 +211,14 @@ function populateForm(b) {
   if (b.run && b.run.startsWith("gtk-launch ")) act = "openapp";
   else if (b.run) act = "run";
   else if (b.macro && b.macro.length) act = "macro";
+  else if (b.states && b.states.length) act = "toggle";
   else if (b.builtin) act = "builtin";
   document.querySelectorAll('input[name="act"]').forEach((r) => {
     r.checked = r.value === act;
   });
   $("run").value = b.run || "";
   $("macro").value = (b.macro || []).join("\n");
+  renderStates(b.states);
   if (act === "openapp") {
     $("appCommand").value = b.run || "";
     const found = state.apps.find((a) => a.command === b.run);
@@ -210,6 +264,7 @@ function syncActionVisibility() {
   if (act !== "openapp") closeAppResults();
   $("run").hidden = act !== "run";
   $("macro").hidden = act !== "macro";
+  $("statesEditor").hidden = act !== "toggle";
   $("builtinRow").hidden = act !== "builtin";
   const sel = $("builtin").value;
   $("builtinValue").hidden = !(sel === "brightness_set");
@@ -246,6 +301,9 @@ function readForm() {
       .map((s) => s.trim())
       .filter(Boolean);
     if (steps.length) b.macro = steps;
+  } else if (act === "toggle") {
+    const states = collectStates();
+    if (states.length) b.states = states;
   } else if (act === "builtin") {
     const sel = $("builtin").value;
     if (sel === "brightness_set") {
@@ -484,6 +542,10 @@ function wire() {
   $("appQuery").addEventListener("focus", onAppInput);
   $("appQuery").addEventListener("blur", () => setTimeout(closeAppResults, 120));
   $("clearKey").addEventListener("click", clearKey);
+  $("addState").addEventListener("click", () => {
+    addStateRow({ color: "#40a02b" });
+    onFormChange();
+  });
   $("brightness").addEventListener("input", onBrightness);
 }
 

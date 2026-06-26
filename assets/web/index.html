@@ -76,6 +76,7 @@
             <label class="radio"><input type="radio" name="act" value="openapp" /> Open application</label>
             <label class="radio"><input type="radio" name="act" value="run" /> Run command</label>
             <label class="radio"><input type="radio" name="act" value="macro" /> Macro (steps)</label>
+            <label class="radio"><input type="radio" name="act" value="toggle" /> Toggle (states)</label>
             <label class="radio"><input type="radio" name="act" value="builtin" /> Built-in</label>
 
             <div id="appSearch" class="combo" hidden>
@@ -95,6 +96,10 @@
             </div>
             <input id="run" type="text" placeholder="e.g. alacritty" hidden />
             <textarea id="macro" rows="3" placeholder="one shell command per line" hidden aria-label="Macro steps"></textarea>
+            <div id="statesEditor" hidden>
+              <div id="statesList"></div>
+              <button id="addState" type="button" class="btn">+ state</button>
+            </div>
             <div id="builtinRow" hidden>
               <select id="builtin" aria-label="Built-in action">
                 <optgroup label="Brightness">

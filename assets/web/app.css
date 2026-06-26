@@ -351,3 +351,28 @@ textarea#macro {
 }
 
 .num { width: 90px; }
+
+#statesEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.state-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.state-row .state-label {
+  width: 90px;
+}
+.state-row .state-run {
+  flex: 1;
+}
+.state-del {
+  border: 1px solid var(--line);
+  background: var(--bg-input);
+  color: var(--danger);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 4px 8px;
+}

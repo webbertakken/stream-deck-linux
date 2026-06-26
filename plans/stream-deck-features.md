@@ -39,10 +39,10 @@ live (auto-refreshing) keys, toggle/multi-state keys, press visual feedback.
 - [x] Editor: watch + interval fields
 
 ## Phase F - Toggle / multi-state keys
-- [ ] Config: `states = [{ label, color, image, text_color, run|builtin }]`
-- [ ] Runtime: per-key state index, cycle on press, render+run current state
+- [x] Config: `states = [{ label, color, image, text_color, run|builtin }]`
+- [x] Runtime: per-key state index, cycle on press, render+run current state
       (+ tests)
-- [ ] Editor: states editor (add / remove)
+- [x] Editor: states editor (add / remove)
 
 ## Phase G - Press visual feedback
 - [ ] Runtime: briefly highlight the pressed key, restore on release (pure
