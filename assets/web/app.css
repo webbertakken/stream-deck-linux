@@ -308,3 +308,33 @@ input[type="color"] {
   color: var(--muted);
   font-style: italic;
 }
+
+/* Page tabs */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 20px 0;
+}
+.tab {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px 8px 0 0;
+  background: var(--bg-input);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+}
+.tab[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.tab--ghost {
+  border-radius: 8px;
+  color: var(--muted);
+}
+.tab:hover {
+  border-color: var(--muted);
+}

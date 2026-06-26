@@ -25,6 +25,8 @@
 
     <p id="status" class="status" role="status" aria-live="polite">&nbsp;</p>
 
+    <nav id="pageTabs" class="tabs" aria-label="Pages"></nav>
+
     <main class="layout">
       <section class="grid-wrap" aria-label="Keys">
         <div id="grid" class="grid"></div>
@@ -100,6 +102,11 @@
                   <option value="volume_down">Volume -</option>
                   <option value="volume_mute">Volume mute</option>
                 </optgroup>
+                <optgroup label="Pages">
+                  <option value="page_next">Page: next</option>
+                  <option value="page_prev">Page: previous</option>
+                  <option value="page">Go to page…</option>
+                </optgroup>
                 <optgroup label="Other">
                   <option value="open">Open URL / file…</option>
                   <option value="reset">Reset device</option>
@@ -107,6 +114,7 @@
               </select>
               <input id="builtinValue" type="number" min="0" max="100" value="70" hidden aria-label="Brightness value" />
               <input id="openTarget" type="text" placeholder="https://… or /path/to/file" hidden aria-label="Open target" />
+              <input id="pageTarget" type="text" placeholder="page name or index" hidden aria-label="Page target" />
             </div>
           </fieldset>
 

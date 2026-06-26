@@ -120,19 +120,18 @@ impl WebUi {
     }
 
     fn load_config(&self) -> Config {
+        let empty = Config {
+            brightness: None,
+            buttons: Vec::new(),
+            pages: Vec::new(),
+        };
         if self.config_path.exists() {
             Config::load(&self.config_path).unwrap_or_else(|err| {
                 eprintln!("web ui: config load failed: {err}");
-                Config {
-                    brightness: None,
-                    buttons: Vec::new(),
-                }
+                empty
             })
         } else {
-            Config {
-                brightness: None,
-                buttons: Vec::new(),
-            }
+            empty
         }
     }
 
@@ -169,7 +168,7 @@ impl WebUi {
                 "keyCount": self.model.key_count,
             },
             "brightness": config.brightness,
-            "buttons": config.buttons,
+            "pages": config.pages(),
         });
         let body = serde_json::to_vec(&state).map_err(|e| Error::Web(e.to_string()))?;
         respond(request, 200, "application/json", &body)
@@ -216,23 +215,34 @@ impl WebUi {
         respond(request, 200, "application/json", br#"{"ok":true}"#)
     }
 
+    /// `GET /api/preview/<page>/<key>.png` (or `/api/preview/<key>.png` for
+    /// page 0): the rendered key image for that page.
     fn get_preview(&self, request: Request, path: &str) -> Result<()> {
-        let key: u8 = match path
+        let rest = path
             .trim_start_matches("/api/preview/")
-            .trim_end_matches(".png")
-            .parse()
-        {
-            Ok(key) => key,
-            Err(_) => return respond(request, 400, "text/plain", b"bad key"),
+            .trim_end_matches(".png");
+        let mut parts = rest.split('/');
+        let first = parts.next();
+        let second = parts.next();
+        let (page, key) = match (first, second) {
+            (Some(a), Some(b)) => (a.parse::<usize>().ok(), b.parse::<u8>().ok()),
+            (Some(a), None) => (Some(0usize), a.parse::<u8>().ok()),
+            _ => (None, None),
+        };
+        let (Some(page), Some(key)) = (page, key) else {
+            return respond(request, 400, "text/plain", b"bad preview path");
         };
 
         let config = self.load_config();
-        let button = config.buttons.iter().find(|b| b.key == key).cloned();
-        let button = button.unwrap_or(crate::config::ButtonConfig {
-            key,
-            color: Some("#000000".into()),
-            ..Default::default()
-        });
+        let pages = config.pages();
+        let button = pages
+            .get(page)
+            .and_then(|p| p.buttons.iter().find(|b| b.key == key).cloned())
+            .unwrap_or(crate::config::ButtonConfig {
+                key,
+                color: Some("#000000".into()),
+                ..Default::default()
+            });
         let png = render::button_png(&self.model.image, &self.base_dir, &button)?;
         respond(request, 200, "image/png", &png)
     }

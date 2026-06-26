@@ -24,14 +24,32 @@ use crate::actions::Builtin;
 use crate::error::{Error, Result};
 use crate::model::Model;
 
-/// A full Stream Deck layout: optional brightness plus per-key buttons.
+/// A full Stream Deck layout: optional brightness, plus either a single page of
+/// `buttons` or several named `pages`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Display brightness percentage to apply on load (`0..=100`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brightness: Option<u8>,
-    /// Per-key configuration.
+    /// Single-page shorthand: the buttons of the one and only page. Mutually
+    /// exclusive with `pages`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buttons: Vec<ButtonConfig>,
+    /// Multi-page layout. Switch with the `page_next` / `page_prev` /
+    /// `page:<name|index>` built-ins.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<Page>,
+}
+
+/// One page of a multi-page layout.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Page {
+    /// Optional page name (referenced by the `page:<name>` built-in).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The page's per-key buttons.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub buttons: Vec<ButtonConfig>,
 }
@@ -81,8 +99,22 @@ impl Config {
         toml::to_string_pretty(self).map_err(|err| Error::ConfigInvalid(err.to_string()))
     }
 
-    /// Validate the config against a model: keys in range, no duplicates,
-    /// brightness sane, and every button visually defined.
+    /// The normalised page list: explicit `pages` if present, otherwise the
+    /// top-level `buttons` wrapped into a single unnamed page.
+    pub fn pages(&self) -> Vec<Page> {
+        if self.pages.is_empty() {
+            vec![Page {
+                name: None,
+                buttons: self.buttons.clone(),
+            }]
+        } else {
+            self.pages.clone()
+        }
+    }
+
+    /// Validate the config against a model: keys in range, no duplicates per
+    /// page, brightness sane, every button visually defined, and page targets
+    /// that exist.
     pub fn validate(&self, model: &Model) -> Result<()> {
         if let Some(b) = self.brightness {
             if b > 100 {
@@ -91,46 +123,86 @@ impl Config {
                 )));
             }
         }
+        if !self.buttons.is_empty() && !self.pages.is_empty() {
+            return Err(Error::ConfigInvalid(
+                "set either top-level `buttons` or `pages`, not both".into(),
+            ));
+        }
 
-        let mut seen = vec![false; model.key_count as usize];
-        for button in &self.buttons {
-            if !model.is_valid_key(button.key) {
-                return Err(Error::ConfigInvalid(format!(
-                    "key {} out of range (device has {} keys)",
-                    button.key, model.key_count
-                )));
-            }
-            let slot = &mut seen[button.key as usize];
-            if *slot {
-                return Err(Error::ConfigInvalid(format!(
-                    "key {} configured more than once",
-                    button.key
-                )));
-            }
-            *slot = true;
-
-            if button.image.is_none() && button.color.is_none() && button.label.is_none() {
-                return Err(Error::ConfigInvalid(format!(
-                    "key {} has no image, color or label",
-                    button.key
-                )));
-            }
-            // Surface bad colours at validation time, not mid-render.
-            let _ = button.rgb()?;
-            let _ = button.text_rgb()?;
-
-            if button.run.is_some() && button.builtin.is_some() {
-                return Err(Error::ConfigInvalid(format!(
-                    "key {} sets both run and builtin (choose one)",
-                    button.key
-                )));
-            }
-            if let Some(spec) = &button.builtin {
-                Builtin::parse(spec)?;
-            }
+        let pages = self.pages();
+        let names: Vec<Option<String>> = pages.iter().map(|p| p.name.clone()).collect();
+        for page in &pages {
+            validate_buttons(&page.buttons, model, pages.len(), &names)?;
         }
         Ok(())
     }
+}
+
+/// Resolve a `page:` target (a 0-based index or a page name) to a page index.
+pub fn resolve_page_target(
+    target: &str,
+    page_count: usize,
+    names: &[Option<String>],
+) -> Option<usize> {
+    let target = target.trim();
+    if let Ok(index) = target.parse::<usize>() {
+        return (index < page_count).then_some(index);
+    }
+    names.iter().position(|n| n.as_deref() == Some(target))
+}
+
+fn validate_buttons(
+    buttons: &[ButtonConfig],
+    model: &Model,
+    page_count: usize,
+    names: &[Option<String>],
+) -> Result<()> {
+    let mut seen = vec![false; model.key_count as usize];
+    for button in buttons {
+        if !model.is_valid_key(button.key) {
+            return Err(Error::ConfigInvalid(format!(
+                "key {} out of range (device has {} keys)",
+                button.key, model.key_count
+            )));
+        }
+        let slot = &mut seen[button.key as usize];
+        if *slot {
+            return Err(Error::ConfigInvalid(format!(
+                "key {} configured more than once",
+                button.key
+            )));
+        }
+        *slot = true;
+
+        if button.image.is_none() && button.color.is_none() && button.label.is_none() {
+            return Err(Error::ConfigInvalid(format!(
+                "key {} has no image, color or label",
+                button.key
+            )));
+        }
+        // Surface bad colours at validation time, not mid-render.
+        let _ = button.rgb()?;
+        let _ = button.text_rgb()?;
+
+        if button.run.is_some() && button.builtin.is_some() {
+            return Err(Error::ConfigInvalid(format!(
+                "key {} sets both run and builtin (choose one)",
+                button.key
+            )));
+        }
+        if let Some(spec) = &button.builtin {
+            let builtin = Builtin::parse(spec)?;
+            if let Builtin::Page(target) = &builtin {
+                if resolve_page_target(target, page_count, names).is_none() {
+                    return Err(Error::ConfigInvalid(format!(
+                        "key {} targets unknown page '{target}'",
+                        button.key
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 impl ButtonConfig {
@@ -299,6 +371,52 @@ run = "amixer set Master toggle"
     fn validate_accepts_label_only_button() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 2\nlabel = \"Mute\"\n").unwrap();
         assert!(config.validate(&Model::MK2).is_ok());
+    }
+
+    #[test]
+    fn pages_wraps_top_level_buttons() {
+        let config = Config::from_toml_str("[[buttons]]\nkey = 0\nlabel = \"A\"\n").unwrap();
+        let pages = config.pages();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].name, None);
+        assert_eq!(pages[0].buttons.len(), 1);
+    }
+
+    #[test]
+    fn parses_and_validates_multi_page() {
+        let toml = "[[pages]]\nname = \"main\"\n[[pages.buttons]]\nkey = 0\nlabel = \"Go\"\nbuiltin = \"page:media\"\n\n[[pages]]\nname = \"media\"\n[[pages.buttons]]\nkey = 0\nlabel = \"Back\"\nbuiltin = \"page_prev\"\n";
+        let config = Config::from_toml_str(toml).unwrap();
+        assert_eq!(config.pages().len(), 2);
+        assert!(config.validate(&Model::MK2).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_both_buttons_and_pages() {
+        let toml = "[[buttons]]\nkey = 0\nlabel = \"x\"\n[[pages]]\nname = \"p\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("not both")));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_page_target() {
+        let toml = "[[pages]]\nname = \"main\"\n[[pages.buttons]]\nkey = 0\nlabel = \"x\"\nbuiltin = \"page:ghost\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("unknown page")));
+    }
+
+    #[test]
+    fn page_target_resolves_by_index_and_name() {
+        let names = vec![Some("main".to_string()), Some("media".to_string())];
+        assert_eq!(resolve_page_target("1", 2, &names), Some(1));
+        assert_eq!(resolve_page_target("media", 2, &names), Some(1));
+        assert_eq!(resolve_page_target("9", 2, &names), None);
+        assert_eq!(resolve_page_target("ghost", 2, &names), None);
     }
 
     #[test]

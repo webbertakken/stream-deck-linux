@@ -1,0 +1,31 @@
+# Two-page layout. Key 4 jumps between pages with the page:<name> built-in.
+brightness = 70
+
+[[pages]]
+name = "main"
+
+[[pages.buttons]]
+key = 0
+color = "#1e66f5"
+label = "Main"
+
+[[pages.buttons]]
+key = 4
+color = "#40a02b"
+label = "Media >"
+builtin = "page:media"
+
+[[pages]]
+name = "media"
+
+[[pages.buttons]]
+key = 0
+color = "#e64553"
+label = "Media"
+builtin = "media_play_pause"
+
+[[pages.buttons]]
+key = 4
+color = "#6c6f85"
+label = "< Back"
+builtin = "page:main"

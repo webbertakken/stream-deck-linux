@@ -21,11 +21,11 @@ live (auto-refreshing) keys, toggle/multi-state keys, press visual feedback.
 - [x] Verify via headless-Chrome screenshot
 
 ## Phase C - Multi-page layouts
-- [ ] Config: `[[pages]]` (name + buttons); back-compat with top-level
+- [x] Config: `[[pages]]` (name + buttons); back-compat with top-level
       `buttons`; normalisation + validation (+ tests)
-- [ ] Page-nav built-ins: `page_next`, `page_prev`, `page:<name|index>`
-- [ ] Runtime: page-aware model (current page, render page, switch + re-render)
-- [ ] Editor: page tabs (switch / add / rename / delete)
+- [x] Page-nav built-ins: `page_next`, `page_prev`, `page:<name|index>`
+- [x] Runtime: page-aware model (current page, render page, switch + re-render)
+- [x] Editor: page tabs (switch / add / rename / delete)
 
 ## Phase D - Macro keys (run a sequence)
 - [ ] Config: `macro = ["cmd1", "cmd2"]`; mutually exclusive w/ run/builtin

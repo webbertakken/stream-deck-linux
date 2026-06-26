@@ -4,9 +4,12 @@ const $ = (id) => document.getElementById(id);
 const state = {
   model: { keyCount: 15, columns: 5, rows: 3, name: "" },
   brightness: 60,
-  buttons: new Map(), // key -> button object
+  pages: [], // [{ name: string|null, buttons: Map<key, button> }]
+  currentPage: 0,
   apps: [],
   selected: 0,
+  appActive: -1,
+  appMatches: [],
 };
 
 function statusMsg(text, kind) {
@@ -16,7 +19,6 @@ function statusMsg(text, kind) {
   else delete el.dataset.kind;
 }
 
-// A button is empty when nothing is set at all.
 function isEmpty(b) {
   return (
     !b ||
@@ -24,13 +26,16 @@ function isEmpty(b) {
   );
 }
 
-// A button is persistable/renderable only with a visual (image/colour/label).
 function hasVisual(b) {
   return !!(b && (b.image || b.color || b.label));
 }
 
+function currentButtons() {
+  return state.pages[state.currentPage].buttons;
+}
+
 function previewUrl(key) {
-  return `/api/preview/${key}.png?ts=${Date.now()}`;
+  return `/api/preview/${state.currentPage}/${key}.png?ts=${Date.now()}`;
 }
 
 function refreshPreview(key) {
@@ -40,6 +45,38 @@ function refreshPreview(key) {
 
 function refreshAllPreviews() {
   for (let k = 0; k < state.model.keyCount; k++) refreshPreview(k);
+}
+
+function buildPageTabs() {
+  const nav = $("pageTabs");
+  nav.innerHTML = "";
+  state.pages.forEach((p, i) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "tab";
+    tab.setAttribute("aria-selected", i === state.currentPage ? "true" : "false");
+    tab.textContent = p.name || `Page ${i + 1}`;
+    tab.title = "Click to edit, double-click to rename";
+    tab.addEventListener("click", () => switchPage(i));
+    tab.addEventListener("dblclick", () => renamePage(i));
+    nav.appendChild(tab);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "tab tab--ghost";
+  add.textContent = "+";
+  add.title = "Add page";
+  add.addEventListener("click", addPage);
+  nav.appendChild(add);
+  if (state.pages.length > 1) {
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "tab tab--ghost";
+    del.textContent = "\u2715";
+    del.title = "Delete current page";
+    del.addEventListener("click", deletePage);
+    nav.appendChild(del);
+  }
 }
 
 function buildGrid() {
@@ -60,10 +97,159 @@ function buildGrid() {
   }
 }
 
+function switchPage(i) {
+  state.currentPage = i;
+  state.selected = 0;
+  buildPageTabs();
+  buildGrid();
+  selectKey(0);
+}
+
+function addPage() {
+  state.pages.push({ name: null, buttons: new Map() });
+  switchPage(state.pages.length - 1);
+  applyNow();
+}
+
+function renamePage(i) {
+  const name = prompt("Page name", state.pages[i].name || "");
+  if (name === null) return;
+  state.pages[i].name = name.trim() || null;
+  buildPageTabs();
+  applyNow();
+}
+
+function deletePage() {
+  if (state.pages.length <= 1) return;
+  state.pages.splice(state.currentPage, 1);
+  state.currentPage = Math.min(state.currentPage, state.pages.length - 1);
+  switchPage(state.currentPage);
+  applyNow();
+}
+
+function selectKey(key) {
+  state.selected = key;
+  document
+    .querySelectorAll(".key")
+    .forEach((c) =>
+      c.setAttribute("aria-pressed", c.dataset.key === String(key) ? "true" : "false"),
+    );
+  $("selKey").textContent = String(key);
+  populateForm(currentButtons().get(key) || { key });
+}
+
+function populateForm(b) {
+  $("label").value = b.label || "";
+  $("useText").checked = !!b.text_color;
+  $("textColor").value = b.text_color || "#ffffff";
+  $("useColor").checked = !!b.color;
+  $("color").value = b.color || "#1e1e2e";
+  $("image").value = b.image || "";
+
+  let act = "none";
+  if (b.run && b.run.startsWith("gtk-launch ")) act = "openapp";
+  else if (b.run) act = "run";
+  else if (b.builtin) act = "builtin";
+  document.querySelectorAll('input[name="act"]').forEach((r) => {
+    r.checked = r.value === act;
+  });
+  $("run").value = b.run || "";
+  if (act === "openapp") {
+    $("appCommand").value = b.run || "";
+    const found = state.apps.find((a) => a.command === b.run);
+    $("appQuery").value = found ? found.name : b.run || "";
+  } else {
+    $("appCommand").value = "";
+    $("appQuery").value = "";
+  }
+  closeAppResults();
+
+  let builtin = "brightness_up";
+  let bvalue = 70;
+  let openTarget = "";
+  if (b.builtin) {
+    if (b.builtin.startsWith("brightness_set:") || b.builtin.startsWith("brightness:")) {
+      builtin = "brightness_set";
+      bvalue = parseInt(b.builtin.split(":")[1], 10) || 70;
+    } else if (b.builtin.startsWith("open:")) {
+      builtin = "open";
+      openTarget = b.builtin.slice("open:".length);
+    } else if (b.builtin.startsWith("page:")) {
+      builtin = "page";
+      openTarget = b.builtin.slice("page:".length);
+    } else {
+      builtin = b.builtin;
+    }
+  }
+  $("builtin").value = builtin;
+  $("builtinValue").value = bvalue;
+  $("openTarget").value = builtin === "page" ? "" : openTarget;
+  $("pageTarget").value = builtin === "page" ? openTarget : "";
+
+  syncActionVisibility();
+}
+
+function currentAction() {
+  return document.querySelector('input[name="act"]:checked')?.value || "none";
+}
+
+function syncActionVisibility() {
+  const act = currentAction();
+  $("appSearch").hidden = act !== "openapp";
+  if (act !== "openapp") closeAppResults();
+  $("run").hidden = act !== "run";
+  $("builtinRow").hidden = act !== "builtin";
+  const sel = $("builtin").value;
+  $("builtinValue").hidden = !(sel === "brightness_set");
+  $("openTarget").hidden = !(sel === "open");
+  $("pageTarget").hidden = !(sel === "page");
+}
+
+function readForm() {
+  const key = state.selected;
+  const b = { key };
+  const label = $("label").value.trim();
+  if (label) b.label = label;
+  if ($("useText").checked) b.text_color = $("textColor").value;
+  if ($("useColor").checked) b.color = $("color").value;
+  const image = $("image").value.trim();
+  if (image) b.image = image;
+
+  const act = currentAction();
+  if (act === "openapp") {
+    const cmd = $("appCommand").value;
+    if (cmd) b.run = cmd;
+  } else if (act === "run") {
+    const run = $("run").value.trim();
+    if (run) b.run = run;
+  } else if (act === "builtin") {
+    const sel = $("builtin").value;
+    if (sel === "brightness_set") {
+      b.builtin = `brightness_set:${$("builtinValue").value}`;
+    } else if (sel === "open") {
+      const target = $("openTarget").value.trim();
+      if (target) b.builtin = `open:${target}`;
+    } else if (sel === "page") {
+      const target = $("pageTarget").value.trim();
+      if (target) b.builtin = `page:${target}`;
+    } else {
+      b.builtin = sel;
+    }
+  }
+  return b;
+}
+
+function onFormChange() {
+  const b = readForm();
+  if (isEmpty(b)) currentButtons().delete(state.selected);
+  else currentButtons().set(state.selected, b);
+  syncActionVisibility();
+  scheduleApply();
+}
+
 // ---- Fuzzy application search (combobox) ----
 const MAX_APP_RESULTS = 30;
 
-// Subsequence fuzzy score; -1 when not all query chars match in order.
 function fuzzyScore(query, text) {
   if (!query) return 0;
   const q = query.toLowerCase();
@@ -75,14 +261,14 @@ function fuzzyScore(query, text) {
   for (; ti < t.length && qi < q.length; ti++) {
     if (t[ti] === q[qi]) {
       score += 1;
-      if (ti === prev + 1) score += 4; // consecutive run
-      if (ti === 0 || /[\s\-_./]/.test(t[ti - 1])) score += 3; // word boundary
+      if (ti === prev + 1) score += 4;
+      if (ti === 0 || /[\s\-_./]/.test(t[ti - 1])) score += 3;
       prev = ti;
       qi++;
     }
   }
   if (qi < q.length) return -1;
-  return score - ti * 0.01; // gently prefer shorter/earlier matches
+  return score - ti * 0.01;
 }
 
 function appMatches(query) {
@@ -122,7 +308,6 @@ function renderAppResults() {
     span.className = "combo__name";
     span.textContent = app.name;
     li.appendChild(span);
-    // mousedown (not click) so it fires before the input blur closes the list
     li.addEventListener("mousedown", (e) => {
       e.preventDefault();
       chooseApp(app);
@@ -132,14 +317,12 @@ function renderAppResults() {
 }
 
 function openAppResults() {
-  const ul = $("appResults");
-  ul.hidden = false;
+  $("appResults").hidden = false;
   $("appQuery").setAttribute("aria-expanded", "true");
 }
 
 function closeAppResults() {
-  const ul = $("appResults");
-  ul.hidden = true;
+  $("appResults").hidden = true;
   state.appActive = -1;
   $("appQuery").setAttribute("aria-expanded", "false");
 }
@@ -154,7 +337,7 @@ function chooseApp(app) {
 }
 
 function onAppInput(e) {
-  e.stopPropagation(); // don't let typing trigger a config apply
+  e.stopPropagation();
   state.appMatches = appMatches($("appQuery").value);
   state.appActive = state.appMatches.length ? 0 : -1;
   renderAppResults();
@@ -181,120 +364,23 @@ function onAppKeydown(e) {
   }
 }
 
-function selectKey(key) {
-  state.selected = key;
-  document.querySelectorAll(".key").forEach((c) =>
-    c.setAttribute("aria-pressed", c.dataset.key === String(key) ? "true" : "false"),
-  );
-  $("selKey").textContent = String(key);
-  populateForm(state.buttons.get(key) || { key });
-}
-
-function populateForm(b) {
-  $("label").value = b.label || "";
-  $("useText").checked = !!b.text_color;
-  $("textColor").value = b.text_color || "#ffffff";
-  $("useColor").checked = !!b.color;
-  $("color").value = b.color || "#1e1e2e";
-  $("image").value = b.image || "";
-
-  let act = "none";
-  if (b.run && b.run.startsWith("gtk-launch ")) act = "openapp";
-  else if (b.run) act = "run";
-  else if (b.builtin) act = "builtin";
-  document.querySelectorAll('input[name="act"]').forEach((r) => {
-    r.checked = r.value === act;
-  });
-  $("run").value = b.run || "";
-  if (act === "openapp") {
-    $("appCommand").value = b.run || "";
-    const found = state.apps.find((a) => a.command === b.run);
-    $("appQuery").value = found ? found.name : b.run || "";
-  } else {
-    $("appCommand").value = "";
-    $("appQuery").value = "";
-  }
-  closeAppResults();
-
-  let builtin = "brightness_up";
-  let bvalue = 70;
-  let openTarget = "";
-  if (b.builtin) {
-    if (b.builtin.startsWith("brightness_set:") || b.builtin.startsWith("brightness:")) {
-      builtin = "brightness_set";
-      bvalue = parseInt(b.builtin.split(":")[1], 10) || 70;
-    } else if (b.builtin.startsWith("open:")) {
-      builtin = "open";
-      openTarget = b.builtin.slice("open:".length);
-    } else {
-      builtin = b.builtin;
-    }
-  }
-  $("builtin").value = builtin;
-  $("builtinValue").value = bvalue;
-  $("openTarget").value = openTarget;
-
-  syncActionVisibility();
-}
-
-function currentAction() {
-  return document.querySelector('input[name="act"]:checked')?.value || "none";
-}
-
-function syncActionVisibility() {
-  const act = currentAction();
-  $("appSearch").hidden = act !== "openapp";
-  if (act !== "openapp") closeAppResults();
-  $("run").hidden = act !== "run";
-  $("builtinRow").hidden = act !== "builtin";
-  $("builtinValue").hidden = !($("builtin").value === "brightness_set");
-  $("openTarget").hidden = !($("builtin").value === "open");
-}
-
-function readForm() {
-  const key = state.selected;
-  const b = { key };
-  const label = $("label").value.trim();
-  if (label) b.label = label;
-  if ($("useText").checked) b.text_color = $("textColor").value;
-  if ($("useColor").checked) b.color = $("color").value;
-  const image = $("image").value.trim();
-  if (image) b.image = image;
-
-  const act = currentAction();
-  if (act === "openapp") {
-    const cmd = $("appCommand").value;
-    if (cmd) b.run = cmd;
-  } else if (act === "run") {
-    const run = $("run").value.trim();
-    if (run) b.run = run;
-  } else if (act === "builtin") {
-    const sel = $("builtin").value;
-    if (sel === "brightness_set") {
-      b.builtin = `brightness_set:${$("builtinValue").value}`;
-    } else if (sel === "open") {
-      const target = $("openTarget").value.trim();
-      if (target) b.builtin = `open:${target}`;
-    } else {
-      b.builtin = sel;
-    }
-  }
-  return b;
-}
-
-function onFormChange() {
-  const b = readForm();
-  if (isEmpty(b)) state.buttons.delete(state.selected);
-  else state.buttons.set(state.selected, b);
-  syncActionVisibility();
-  scheduleApply();
+function pageToObj(p) {
+  const buttons = [...p.buttons.values()].filter(hasVisual).sort((a, z) => a.key - z.key);
+  const obj = { buttons };
+  if (p.name) obj.name = p.name;
+  return obj;
 }
 
 function collectConfig() {
-  const buttons = [...state.buttons.values()]
-    .filter(hasVisual)
-    .sort((a, z) => a.key - z.key);
-  return { brightness: state.brightness, buttons };
+  const cfg = { brightness: state.brightness };
+  if (state.pages.length === 1 && !state.pages[0].name) {
+    cfg.buttons = [...state.pages[0].buttons.values()]
+      .filter(hasVisual)
+      .sort((a, z) => a.key - z.key);
+  } else {
+    cfg.pages = state.pages.map(pageToObj);
+  }
+  return cfg;
 }
 
 let applyTimer = null;
@@ -337,30 +423,32 @@ function onBrightness() {
 }
 
 function clearKey() {
-  state.buttons.delete(state.selected);
+  currentButtons().delete(state.selected);
   populateForm({ key: state.selected });
   applyNow();
 }
 
 async function load() {
-  const [stateRes, appsRes] = await Promise.all([
-    fetch("/api/state"),
-    fetch("/api/apps"),
-  ]);
+  const [stateRes, appsRes] = await Promise.all([fetch("/api/state"), fetch("/api/apps")]);
   const data = await stateRes.json();
   state.apps = await appsRes.json().catch(() => []);
   state.model = data.model;
   state.brightness = data.brightness ?? 60;
-  state.buttons = new Map();
-  for (const b of data.buttons || []) state.buttons.set(b.key, b);
+  const pages = data.pages && data.pages.length ? data.pages : [{ name: null, buttons: [] }];
+  state.pages = pages.map((p) => ({
+    name: p.name || null,
+    buttons: new Map((p.buttons || []).map((b) => [b.key, b])),
+  }));
+  state.currentPage = 0;
 
   $("model").textContent = data.model.name ? `\u00b7 ${data.model.name}` : "";
   $("brightness").value = state.brightness;
   $("brightnessOut").textContent = `${state.brightness}%`;
 
+  buildPageTabs();
   buildGrid();
   selectKey(0);
-  statusMsg(`Ready \u2014 ${state.apps.length} apps. Edits apply live.`, "ok");
+  statusMsg(`Ready \u2014 ${state.apps.length} apps, ${state.pages.length} page(s).`, "ok");
 }
 
 function wire() {

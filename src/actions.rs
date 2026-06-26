@@ -31,6 +31,12 @@ pub enum Builtin {
     Media(Media),
     /// System volume control (wpctl / pactl / amixer).
     Volume(Volume),
+    /// Switch to the next page (wraps).
+    PageNext,
+    /// Switch to the previous page (wraps).
+    PagePrev,
+    /// Switch to a page by name or 0-based index.
+    Page(String),
 }
 
 impl Builtin {
@@ -52,7 +58,16 @@ impl Builtin {
             "volume_up" => return Ok(Builtin::Volume(Volume::Up)),
             "volume_down" => return Ok(Builtin::Volume(Volume::Down)),
             "volume_mute" => return Ok(Builtin::Volume(Volume::Mute)),
+            "page_next" => return Ok(Builtin::PageNext),
+            "page_prev" => return Ok(Builtin::PagePrev),
             _ => {}
+        }
+        if let Some(target) = spec.strip_prefix("page:") {
+            let target = target.trim();
+            if target.is_empty() {
+                return Err(Error::ConfigInvalid("page: needs a name or index".into()));
+            }
+            return Ok(Builtin::Page(target.to_string()));
         }
         if let Some(value) = spec
             .strip_prefix("brightness_set:")
@@ -174,6 +189,21 @@ mod tests {
             Builtin::parse("volume_mute").unwrap(),
             Builtin::Volume(Volume::Mute)
         );
+    }
+
+    #[test]
+    fn parses_page_builtins() {
+        assert_eq!(Builtin::parse("page_next").unwrap(), Builtin::PageNext);
+        assert_eq!(Builtin::parse("page_prev").unwrap(), Builtin::PagePrev);
+        assert_eq!(
+            Builtin::parse("page:media").unwrap(),
+            Builtin::Page("media".into())
+        );
+        assert_eq!(Builtin::parse("page:2").unwrap(), Builtin::Page("2".into()));
+        assert!(matches!(
+            Builtin::parse("page:").unwrap_err(),
+            Error::ConfigInvalid(_)
+        ));
     }
 
     #[test]
