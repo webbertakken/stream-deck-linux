@@ -9,6 +9,8 @@
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Tools {
     pub playerctl: bool,
+    /// Emulates the desktop's `XF86Audio*` keys (gives the native OSD).
+    pub xdotool: bool,
     pub wpctl: bool,
     pub pactl: bool,
     pub amixer: bool,
@@ -37,6 +39,7 @@ const VOLUME_STEP: u32 = 5;
 pub fn detect_tools() -> Tools {
     Tools {
         playerctl: on_path("playerctl"),
+        xdotool: on_path("xdotool"),
         wpctl: on_path("wpctl"),
         pactl: on_path("pactl"),
         amixer: on_path("amixer"),
@@ -61,21 +64,49 @@ pub fn open_command(target: &str) -> String {
     format!("xdg-open {}", shell_quote(target))
 }
 
-/// Command for a media transport action, if a player controller is available.
-pub fn media_command(action: Media, tools: &Tools) -> Option<String> {
-    if !tools.playerctl {
-        return None;
+/// Command for a media transport action. Prefers `playerctl`, then the desktop
+/// media keys (`xdotool`, with OSD), and always falls back to driving the first
+/// MPRIS player over D-Bus (`busctl`, present on any systemd desktop).
+pub fn media_command(action: Media, tools: &Tools) -> String {
+    if tools.playerctl {
+        let verb = match action {
+            Media::PlayPause => "play-pause",
+            Media::Next => "next",
+            Media::Prev => "previous",
+        };
+        return format!("playerctl {verb}");
     }
-    let verb = match action {
-        Media::PlayPause => "play-pause",
-        Media::Next => "next",
-        Media::Prev => "previous",
+    if tools.xdotool {
+        let key = match action {
+            Media::PlayPause => "XF86AudioPlay",
+            Media::Next => "XF86AudioNext",
+            Media::Prev => "XF86AudioPrev",
+        };
+        return format!("xdotool key {key}");
+    }
+    let method = match action {
+        Media::PlayPause => "PlayPause",
+        Media::Next => "Next",
+        Media::Prev => "Previous",
     };
-    Some(format!("playerctl {verb}"))
+    format!(
+        "p=$(busctl --user list --no-legend 2>/dev/null | \
+         awk '/org\\.mpris\\.MediaPlayer2\\./{{print $1; exit}}'); \
+         [ -n \"$p\" ] && busctl --user call \"$p\" /org/mpris/MediaPlayer2 \
+         org.mpris.MediaPlayer2.Player {method}"
+    )
 }
 
-/// Command for a volume action, preferring wpctl, then pactl, then amixer.
+/// Command for a volume action. Prefers `xdotool` (the desktop media keys, so
+/// the volume OSD shows), then wpctl, pactl, amixer.
 pub fn volume_command(action: Volume, tools: &Tools) -> Option<String> {
+    if tools.xdotool {
+        return Some(match action {
+            Volume::Up => "xdotool key XF86AudioRaiseVolume".to_string(),
+            Volume::Down => "xdotool key XF86AudioLowerVolume".to_string(),
+            Volume::Mute => "xdotool key XF86AudioMute".to_string(),
+        });
+    }
     if tools.wpctl {
         return Some(match action {
             // `-l 1.0` clamps so a key can't push past 100%.
@@ -115,29 +146,34 @@ mod tests {
     }
 
     #[test]
-    fn media_needs_playerctl() {
-        let none = Tools::default();
-        assert_eq!(media_command(Media::PlayPause, &none), None);
-        let with = Tools {
+    fn media_prefers_playerctl_then_xdotool_then_mpris() {
+        let pc = Tools {
             playerctl: true,
             ..Default::default()
         };
-        assert_eq!(
-            media_command(Media::PlayPause, &with).as_deref(),
-            Some("playerctl play-pause")
-        );
-        assert_eq!(
-            media_command(Media::Next, &with).as_deref(),
-            Some("playerctl next")
-        );
-        assert_eq!(
-            media_command(Media::Prev, &with).as_deref(),
-            Some("playerctl previous")
-        );
+        assert_eq!(media_command(Media::PlayPause, &pc), "playerctl play-pause");
+
+        let xd = Tools {
+            xdotool: true,
+            ..Default::default()
+        };
+        assert_eq!(media_command(Media::Next, &xd), "xdotool key XF86AudioNext");
+
+        let mpris = media_command(Media::PlayPause, &Tools::default());
+        assert!(mpris.contains("busctl") && mpris.contains("PlayPause"));
     }
 
     #[test]
-    fn volume_prefers_wpctl_then_pactl_then_amixer() {
+    fn volume_prefers_xdotool_then_wpctl_then_pactl_then_amixer() {
+        let xd = Tools {
+            xdotool: true,
+            wpctl: true,
+            ..Default::default()
+        };
+        assert!(volume_command(Volume::Up, &xd)
+            .unwrap()
+            .starts_with("xdotool "));
+
         let wp = Tools {
             wpctl: true,
             pactl: true,

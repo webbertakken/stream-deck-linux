@@ -209,7 +209,7 @@ function populateForm(b) {
   $("interval").value = b.interval || 5;
 
   let act = "none";
-  if (b.run && b.run.startsWith("gtk-launch ")) act = "openapp";
+  if (b.run && b.run.includes("gtk-launch ")) act = "openapp";
   else if (b.run) act = "run";
   else if (b.macro && b.macro.length) act = "macro";
   else if (b.states && b.states.length) act = "toggle";

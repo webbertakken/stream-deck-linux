@@ -340,10 +340,10 @@ impl Session {
                 println!("device reset");
             }
             Builtin::Open(target) => self.spawn_command(&system::open_command(target)),
-            Builtin::Media(action) => match system::media_command(*action, &self.tools) {
-                Some(cmd) => self.spawn_command(&cmd),
-                None => eprintln!("error: media control needs `playerctl` (not installed)"),
-            },
+            Builtin::Media(action) => {
+                let cmd = system::media_command(*action, &self.tools);
+                self.spawn_command(&cmd);
+            }
             Builtin::Volume(action) => match system::volume_command(*action, &self.tools) {
                 Some(cmd) => self.spawn_command(&cmd),
                 None => eprintln!("error: volume control needs wpctl/pactl/amixer (none found)"),

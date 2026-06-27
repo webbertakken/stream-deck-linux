@@ -26,6 +26,7 @@ pub struct Entry {
     pub exec: Option<String>,
     pub icon: Option<String>,
     pub kind: Option<String>,
+    pub startup_wm_class: Option<String>,
     pub no_display: bool,
     pub hidden: bool,
 }
@@ -58,6 +59,9 @@ pub fn parse_entry(contents: &str) -> Entry {
             "Exec" if entry.exec.is_none() => entry.exec = Some(value),
             "Icon" if entry.icon.is_none() => entry.icon = Some(value),
             "Type" if entry.kind.is_none() => entry.kind = Some(value),
+            "StartupWMClass" if entry.startup_wm_class.is_none() => {
+                entry.startup_wm_class = Some(value)
+            }
             "NoDisplay" => entry.no_display = value.eq_ignore_ascii_case("true"),
             "Hidden" => entry.hidden = value.eq_ignore_ascii_case("true"),
             _ => {}
@@ -73,6 +77,20 @@ pub fn is_listable(entry: &Entry) -> bool {
         && entry.name.is_some()
         && !entry.no_display
         && !entry.hidden
+}
+
+/// Build the launch command for an app: raise an existing window matching its
+/// WM class (or the desktop id) with `wmctrl`, else launch it with
+/// `gtk-launch`. So pressing the key focuses a running instance instead of
+/// opening a second one. Falls through to launch if `wmctrl` is absent or no
+/// window matches.
+pub fn launch_command(id: &str, wm_class: Option<&str>) -> String {
+    let target = wm_class.filter(|s| !s.is_empty()).unwrap_or(id);
+    format!(
+        "wmctrl -x -a {} 2>/dev/null || gtk-launch {}",
+        crate::system::shell_quote(target),
+        crate::system::shell_quote(id),
+    )
 }
 
 /// Strip `.desktop` Exec field codes (`%u`, `%F`, `%i`, ...).
@@ -178,8 +196,9 @@ pub fn list() -> Vec<DesktopApp> {
                 continue;
             }
             seen.insert(id.clone());
+            let command = launch_command(&id, parsed.startup_wm_class.as_deref());
             apps.push(DesktopApp {
-                command: format!("gtk-launch {id}"),
+                command,
                 name: parsed.name.unwrap_or_else(|| id.clone()),
                 icon: parsed
                     .icon
@@ -232,6 +251,28 @@ mod tests {
     fn non_application_is_not_listable() {
         let entry = parse_entry("[Desktop Entry]\nType=Link\nName=X\nExec=x\n");
         assert!(!is_listable(&entry));
+    }
+
+    #[test]
+    fn launch_command_raises_then_launches() {
+        // With a WM class, raise by class; fall back to gtk-launch by id.
+        assert_eq!(
+            launch_command("firefox", Some("firefox")),
+            "wmctrl -x -a 'firefox' 2>/dev/null || gtk-launch 'firefox'"
+        );
+        // Without a WM class, raise by the desktop id.
+        assert_eq!(
+            launch_command("org.gnome.Calculator", None),
+            "wmctrl -x -a 'org.gnome.Calculator' 2>/dev/null || gtk-launch 'org.gnome.Calculator'"
+        );
+    }
+
+    #[test]
+    fn parses_startup_wm_class() {
+        let entry = parse_entry(
+            "[Desktop Entry]\nType=Application\nName=X\nExec=x\nStartupWMClass=MyApp\n",
+        );
+        assert_eq!(entry.startup_wm_class.as_deref(), Some("MyApp"));
     }
 
     #[test]
