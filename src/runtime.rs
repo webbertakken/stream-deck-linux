@@ -12,6 +12,7 @@ use crate::config::{ButtonConfig, Config, Page};
 use crate::device::StreamDeck;
 use crate::error::Result;
 use crate::events::{diff_states, KeyEventKind};
+use crate::keyboard::{KeyCode, KeyEmitter, UinputKeyboard};
 use crate::render;
 
 /// Brightness assumed when the config does not specify one (for up/down steps).
@@ -74,9 +75,67 @@ pub fn action_map(buttons: &[ButtonConfig]) -> Result<HashMap<u8, KeyAction>> {
             map.insert(button.key, KeyAction::Macro(steps.clone()));
         } else if let Some(states) = &button.states {
             map.insert(button.key, KeyAction::Toggle(states.clone()));
+        } else if let Some(spec) = &button.hold {
+            map.insert(
+                button.key,
+                KeyAction::Hold(crate::keyboard::parse_keys(spec)?),
+            );
         }
     }
     Ok(map)
+}
+
+/// Apply the hold latch for a deck key against an emitter and the held-state
+/// map. Returns `true` if the key is now latched on, `false` if released.
+///
+/// First press holds every code in order (modifiers before the main key);
+/// the next press of the same deck key releases them in reverse order.
+fn apply_hold_latch(
+    emitter: &mut dyn KeyEmitter,
+    held: &mut HashMap<u8, Vec<KeyCode>>,
+    key: u8,
+    codes: &[KeyCode],
+) -> Result<bool> {
+    if let Some(stored) = held.remove(&key) {
+        // Release exactly what was pressed, in reverse order.
+        for code in stored.iter().rev() {
+            emitter.key_up(*code)?;
+        }
+        Ok(false)
+    } else {
+        for code in codes {
+            emitter.key_down(*code)?;
+        }
+        held.insert(key, codes.to_vec());
+        Ok(true)
+    }
+}
+
+/// Release any held key whose action in `actions` no longer defines that exact
+/// hold (button removed, spec changed, or turned into a different action), so a
+/// reload or page change never leaves an orphaned key stuck. Holds whose codes
+/// are unchanged are kept as-is (no double-press).
+fn release_dropped_holds(
+    emitter: &mut dyn KeyEmitter,
+    held: &mut HashMap<u8, Vec<KeyCode>>,
+    actions: &HashMap<u8, KeyAction>,
+) -> Result<()> {
+    let stale: Vec<u8> = held
+        .iter()
+        .filter(|(key, codes)| match actions.get(key) {
+            Some(KeyAction::Hold(new_codes)) => new_codes != *codes,
+            _ => true,
+        })
+        .map(|(key, _)| *key)
+        .collect();
+    for key in stale {
+        if let Some(codes) = held.remove(&key) {
+            for code in codes.iter().rev() {
+                emitter.key_up(*code)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Where a page switch should land.
@@ -133,6 +192,18 @@ struct Session {
     brightness: u8,
     previous: Vec<bool>,
     tools: crate::system::Tools,
+    /// The virtual keyboard, created lazily on first use of a hold key (decks
+    /// with no hold keys never create one).
+    emitter: Option<Box<dyn KeyEmitter>>,
+    /// Builds the virtual keyboard; swappable so the latch is testable.
+    make_emitter: fn() -> Result<Box<dyn KeyEmitter>>,
+    /// Deck key -> keyboard codes currently latched down by that key.
+    held: HashMap<u8, Vec<KeyCode>>,
+}
+
+/// Build the real uinput-backed virtual keyboard.
+fn default_emitter() -> Result<Box<dyn KeyEmitter>> {
+    Ok(Box::new(UinputKeyboard::open()?))
 }
 
 impl Session {
@@ -162,6 +233,9 @@ impl Session {
             brightness,
             previous,
             tools: crate::system::detect_tools(),
+            emitter: None,
+            make_emitter: default_emitter,
+            held: HashMap::new(),
         };
         session.show_page(0)?;
         Ok(session)
@@ -199,7 +273,10 @@ impl Session {
                 }
                 _ => button.clone(),
             };
-            let surface = render::compose(&spec, &self.base_dir, &to_render);
+            let mut surface = render::compose(&spec, &self.base_dir, &to_render);
+            if self.held.contains_key(&button.key) {
+                surface.brighten(0.3);
+            }
             self.deck.set_key_image(button.key, &surface.encode()?)?;
         }
         Ok(())
@@ -225,14 +302,15 @@ impl Session {
         })
     }
 
-    /// Render a key, optionally with the pressed-key highlight.
-    fn render_key(&mut self, key: u8, highlight: bool) -> Result<()> {
+    /// Render a key. It is highlighted while momentarily pressed OR while its
+    /// hold latch is on, so a held key stays lit after the press-flash clears.
+    fn render_key(&mut self, key: u8, momentary: bool) -> Result<()> {
         let Some(button) = self.effective_button(key) else {
             return Ok(());
         };
         let spec = self.deck.model().image;
         let mut surface = render::compose(&spec, &self.base_dir, &button);
-        if highlight {
+        if momentary || self.held.contains_key(&key) {
             surface.brighten(0.3);
         }
         self.deck.set_key_image(key, &surface.encode()?)?;
@@ -383,8 +461,40 @@ impl Session {
         self.pages = config.pages();
         let page = self.current_page.min(self.pages.len().saturating_sub(1));
         self.show_page(page)?;
+        // Free any key still latched whose button no longer defines that hold.
+        if let Some(emitter) = self.emitter.as_deref_mut() {
+            release_dropped_holds(emitter, &mut self.held, &self.actions)?;
+        }
+        self.render_current()?;
         println!("config reloaded ({} page(s))", self.pages.len());
         Ok(())
+    }
+
+    /// Latch or unlatch a hold key. Creates the virtual keyboard lazily; on
+    /// failure logs an actionable error and makes the press a no-op.
+    fn dispatch_hold(&mut self, key: u8, codes: &[KeyCode]) {
+        if self.emitter.is_none() {
+            match (self.make_emitter)() {
+                Ok(emitter) => self.emitter = Some(emitter),
+                Err(err) => {
+                    eprintln!("error: cannot create virtual keyboard: {err}");
+                    return;
+                }
+            }
+        }
+        let Some(emitter) = self.emitter.as_deref_mut() else {
+            return;
+        };
+        match apply_hold_latch(emitter, &mut self.held, key, codes) {
+            Ok(true) => println!("key {key} hold on"),
+            Ok(false) => println!("key {key} hold off"),
+            Err(err) => {
+                eprintln!("error: hold on key {key} failed: {err}");
+                return;
+            }
+        }
+        // Settle the key to its held-aware visual (persistent highlight on/off).
+        let _ = self.render_key(key, false);
     }
 
     /// Apply a control command. `Quit` is handled by the caller.
@@ -446,6 +556,9 @@ impl Session {
                         eprintln!("error: toggle failed: {err}");
                     }
                 }
+                Some(KeyAction::Hold(codes)) => {
+                    self.dispatch_hold(event.key, &codes);
+                }
                 None => {}
             }
         }
@@ -482,6 +595,10 @@ pub fn run_with_control(
         reap_zombies();
     }
 
+    // Release any latched keyboard keys before exit so none stay stuck.
+    if let Some(emitter) = session.emitter.as_deref_mut() {
+        let _ = emitter.release_all();
+    }
     let _ = session.deck.clear_all();
     Ok(())
 }
@@ -523,5 +640,117 @@ mod tests {
     fn action_map_is_empty_without_actions() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 0\ncolor = \"#ffffff\"\n").unwrap();
         assert!(action_map(&config.buttons).unwrap().is_empty());
+    }
+
+    #[test]
+    fn action_map_parses_hold_into_codes() {
+        let config = Config::from_toml_str(
+            "[[buttons]]\nkey = 2\nlabel = \"Hold\"\nhold = \"ctrl+shift+f\"\n",
+        )
+        .unwrap();
+        let actions = action_map(&config.buttons).unwrap();
+        assert_eq!(
+            actions.get(&2),
+            Some(&KeyAction::Hold(vec![
+                KeyCode(29),
+                KeyCode(42),
+                KeyCode(33)
+            ]))
+        );
+    }
+
+    #[test]
+    fn latch_presses_down_then_up_in_correct_order() {
+        use crate::keyboard::RecordingEmitter;
+        let mut emitter = RecordingEmitter::default();
+        let mut held = HashMap::new();
+        let codes = [KeyCode(29), KeyCode(42), KeyCode(33)];
+
+        // First press: latch on, held down in written order.
+        let on = apply_hold_latch(&mut emitter, &mut held, 3, &codes).unwrap();
+        assert!(on);
+        assert_eq!(held.get(&3).unwrap(), &codes.to_vec());
+        assert_eq!(
+            emitter.events,
+            vec![
+                ("down", KeyCode(29)),
+                ("down", KeyCode(42)),
+                ("down", KeyCode(33)),
+            ]
+        );
+
+        // Second press: latch off, released in reverse order.
+        let on = apply_hold_latch(&mut emitter, &mut held, 3, &codes).unwrap();
+        assert!(!on);
+        assert!(!held.contains_key(&3));
+        assert_eq!(
+            emitter.events[3..],
+            [
+                ("up", KeyCode(33)),
+                ("up", KeyCode(42)),
+                ("up", KeyCode(29)),
+            ]
+        );
+    }
+
+    #[test]
+    fn latches_are_independent_per_deck_key() {
+        use crate::keyboard::RecordingEmitter;
+        let mut emitter = RecordingEmitter::default();
+        let mut held = HashMap::new();
+        apply_hold_latch(&mut emitter, &mut held, 1, &[KeyCode(33)]).unwrap();
+        apply_hold_latch(&mut emitter, &mut held, 2, &[KeyCode(30)]).unwrap();
+        assert_eq!(held.len(), 2);
+        // Releasing key 1 leaves key 2 held.
+        apply_hold_latch(&mut emitter, &mut held, 1, &[KeyCode(33)]).unwrap();
+        assert!(!held.contains_key(&1));
+        assert_eq!(held.get(&2).unwrap(), &vec![KeyCode(30)]);
+    }
+
+    #[test]
+    fn release_all_on_shutdown_frees_held_keys() {
+        use crate::keyboard::{KeyEmitter, RecordingEmitter};
+        let mut emitter = RecordingEmitter::default();
+        let mut held = HashMap::new();
+        apply_hold_latch(&mut emitter, &mut held, 3, &[KeyCode(29), KeyCode(33)]).unwrap();
+        emitter.release_all().unwrap();
+        assert!(emitter.held.is_empty());
+        // The two downs plus two release ups.
+        assert_eq!(
+            emitter.events[2..],
+            [("up", KeyCode(29)), ("up", KeyCode(33))]
+        );
+    }
+
+    #[test]
+    fn reload_releases_dropped_hold_but_keeps_unchanged() {
+        use crate::keyboard::RecordingEmitter;
+        let mut emitter = RecordingEmitter::default();
+        let mut held = HashMap::new();
+        apply_hold_latch(&mut emitter, &mut held, 1, &[KeyCode(33)]).unwrap();
+        apply_hold_latch(&mut emitter, &mut held, 2, &[KeyCode(30)]).unwrap();
+
+        // New config: key 1 keeps its hold, key 2 no longer defines it.
+        let mut actions = HashMap::new();
+        actions.insert(1, KeyAction::Hold(vec![KeyCode(33)]));
+        actions.insert(2, KeyAction::Run("echo hi".into()));
+
+        release_dropped_holds(&mut emitter, &mut held, &actions).unwrap();
+        assert!(held.contains_key(&1), "unchanged hold stays");
+        assert!(!held.contains_key(&2), "dropped hold released");
+        assert_eq!(emitter.events.last(), Some(&("up", KeyCode(30))));
+    }
+
+    #[test]
+    fn reload_releases_hold_whose_spec_changed() {
+        use crate::keyboard::RecordingEmitter;
+        let mut emitter = RecordingEmitter::default();
+        let mut held = HashMap::new();
+        apply_hold_latch(&mut emitter, &mut held, 1, &[KeyCode(33)]).unwrap();
+
+        let mut actions = HashMap::new();
+        actions.insert(1, KeyAction::Hold(vec![KeyCode(30)])); // different code
+        release_dropped_holds(&mut emitter, &mut held, &actions).unwrap();
+        assert!(!held.contains_key(&1));
     }
 }

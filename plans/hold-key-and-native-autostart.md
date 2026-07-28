@@ -197,15 +197,15 @@ Read these before touching code; they define the seams you will extend.
 
 ## Phase 3 - Runtime: the hold latch + safe release (TDD)
 
-- [ ] Add `KeyAction::Hold(Vec<KeyCode>)` to `actions.rs` (store parsed codes,
+- [x] Add `KeyAction::Hold(Vec<KeyCode>)` to `actions.rs` (store parsed codes,
       or the raw spec + parse in `action_map` - prefer parsing in `action_map`
       so the runtime holds codes). Update `runtime::action_map` to map a button
       with `hold` to `KeyAction::Hold`. Test: `action_map` yields `Hold` with
       the right codes.
-- [ ] Give `Session` an emitter (`Box<dyn KeyEmitter>` created lazily; store an
+- [x] Give `Session` an emitter (`Box<dyn KeyEmitter>` created lazily; store an
       `Option` and a constructor closure, or an enum `Uninit`/`Ready`) and a
       `held: HashMap<u8, Vec<KeyCode>>` (deck key -> codes currently held).
-- [ ] Latch logic in `poll()` for `KeyAction::Hold(codes)`:
+- [x] Latch logic in `poll()` for `KeyAction::Hold(codes)`:
       - if `held` does NOT contain the key: lazily init the emitter (on failure,
         log actionable error and return - press is a no-op); `key_down` each
         code in order; insert into `held`; mark the key so `render_key`/
@@ -216,23 +216,23 @@ Read these before touching code; they define the seams you will extend.
       Test the state machine with `RecordingEmitter`: press toggles down then
       up; two different keys are independent; unknown-key never reached (config
       validated). Assert modifier ordering (down forward, up reverse).
-- [ ] Press-feedback interaction: a latched key must stay visibly "on" and the
+- [x] Press-feedback interaction: a latched key must stay visibly "on" and the
       release-flash restore in `poll()` must NOT clear a held key's highlight.
       Make `render_key`/`effective_button`/`render_current` held-aware so a
       re-render (page redraw, reload) keeps a held key highlighted. Add a pure
       test for the "held => highlighted" render decision if feasible.
-- [ ] Safety - release on shutdown: in `run_with_control`, after the loop (the
+- [x] Safety - release on shutdown: in `run_with_control`, after the loop (the
       existing `clear_all` path), call `emitter.release_all()` (if the emitter
       was created) so no key stays stuck. Test via `RecordingEmitter` that a
       held key gets a `key_up` on shutdown.
-- [ ] Safety - release on reload: `Session::reload()` (and `show_page` when the
+- [x] Safety - release on reload: `Session::reload()` (and `show_page` when the
       button set changes) must release any held key whose button no longer
       defines that exact hold; keep holds whose button/spec is unchanged.
       Test: reload dropping the hold button releases the key; reload keeping it
       does not double-press.
-- [ ] Reap/no-zombie and existing loop behaviour unaffected (holds do not spawn
+- [x] Reap/no-zombie and existing loop behaviour unaffected (holds do not spawn
       shell children, so no interaction with `reap_zombies`).
-- [ ] `cargo fmt` + clippy + full test. Commit.
+- [x] `cargo fmt` + clippy + full test. Commit.
 
 ## Phase 4 - Held-state visual polish (confirm A1 first if adding config)
 
