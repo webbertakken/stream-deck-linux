@@ -236,31 +236,33 @@ Read these before touching code; they define the seams you will extend.
 
 ## Phase 4 - Held-state visual polish (confirm A1 first if adding config)
 
-- [ ] Default: persistent `brighten(0.3)` while held (from Phase 3). Verify it
-      reads clearly on the device against a normal press-flash.
-- [ ] Optional (only if A1 says so): `active_color` / `active_label` on the
+- [x] Default: persistent `brighten(0.3)` while held (from Phase 3). Verify it
+      reads clearly on the device against a normal press-flash. (Device reading
+      confirmed in Phase 7 hardware verification.)
+- [x] Optional (only if A1 says so): `active_color` / `active_label` on the
       button, rendered while held; validate + round-trip + test. If not doing
-      it, ensure no half-added config remains.
-- [ ] Commit (skip if nothing changed beyond Phase 3).
+      it, ensure no half-added config remains. (A1 default shipped; no
+      configurable form added, no dead config.)
+- [x] Commit (skip if nothing changed beyond Phase 3). (Nothing changed.)
 
 ## Phase 5 - Web editor support
 
-- [ ] `assets/web/app.js`: add a **"Hold key"** action radio alongside run /
+- [x] `assets/web/app.js`: add a **"Hold key"** action radio alongside run /
       builtin / macro / toggle / open-app; a text input for the spec
       (placeholder `e.g. ctrl+shift+f`); load it (`act = "hold"` when
       `b.hold`), collect it into the button on save, and show/hide the input
       with the other action inputs. Keep the mutual-exclusion (selecting Hold
       clears the other action fields on collect).
-- [ ] `assets/web/index.html` + `app.css`: the input element + label + any
+- [x] `assets/web/index.html` + `app.css`: the input element + label + any
       styling, matching the existing controls. Zero layout shift.
-- [ ] Editor writes `hold` into the TOML via the existing `post_state` ->
+- [x] Editor writes `hold` into the TOML via the existing `post_state` ->
       `Config` -> validate -> write -> `Control::Reload` path; a bad spec
       returns the 400 from `validate` (already wired). Manually verify: set a
       key to Hold `f` in the editor, confirm the config file gets `hold = "f"`
       and the daemon reloads.
-- [ ] Verify headlessly (curl the editor, and/or a screenshot as prior phases
+- [x] Verify headlessly (curl the editor, and/or a screenshot as prior phases
       did) that the Hold control renders and round-trips.
-- [ ] Commit.
+- [x] Commit.
 
 ## Phase 6 - Docs, examples, decisions
 
