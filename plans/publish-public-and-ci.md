@@ -63,16 +63,16 @@ commit (where a commit applies), move on. Never batch ticks.
 
 ## Phase 1 - Pre-flight re-confirmation (fast, no code changes)
 
-- [ ] `git status` clean on `feat/hold-key-and-autostart`; the plans files and
+- [x] `git status` clean on `feat/hold-key-and-autostart`; the plans files and
       any intended docs are committed. Nothing unexpected untracked that should
       be published (the local notes stay gitignored).
-- [ ] Fast secret re-scan: `git grep -nIiE "api[_-]?key|secret|token|password|
+- [x] Fast secret re-scan: `git grep -nIiE "api[_-]?key|secret|token|password|
       private[_-]?key|-----BEGIN"` over tracked files excluding `Cargo.lock` -
       confirm only benign matches. Do not deep-dive; the verdict is settled.
-- [ ] Confirm `.gitignore` still excludes `target/`, `AMBIGUITIES.md`,
+- [x] Confirm `.gitignore` still excludes `target/`, `AMBIGUITIES.md`,
       `DECISIONS.md`, `LESSONS_LEARNED.md`, and that none of those are tracked
       (`git ls-files | grep -E 'AMBIGUITIES|DECISIONS|LESSONS'` returns nothing).
-- [ ] Confirm `main` builds/tests are green locally on the branch tip
+- [x] Confirm `main` builds/tests are green locally on the branch tip
       (`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
       `cargo test`), so we publish from a known-green state.
 
