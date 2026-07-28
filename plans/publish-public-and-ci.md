@@ -100,12 +100,14 @@ commit (where a commit applies), move on. Never batch ticks.
 
 ## Phase 4 - CI: make it run and go green on GitHub
 
-- [ ] Confirm the push triggered the `CI` workflow (push to `main` and/or the
+- [x] Confirm the push triggered the `CI` workflow (push to `main` and/or the
       upcoming PR). List runs: `gh run list --limit 5`.
-- [ ] Watch the run to completion: `gh run watch <run-id>` (or poll
+- [x] Watch the run to completion: `gh run watch <run-id>` (or poll
       `gh run view <run-id>`). Capture the outcome of each job step (fmt,
       clippy, test).
-- [ ] If any step fails, diagnose from the logs (`gh run view <run-id> --log
+- [x] No step failed; the runner's uinput gate held (Tests passed with
+      `/dev/uinput` absent) and all examples compiled. Diagnosis path (unused):
+      diagnose from the logs (`gh run view <run-id> --log
       --job <job-id>`) and fix the **root cause**:
       - Hardware/`/dev/uinput`-dependent tests MUST be skipped cleanly on the
         runner (verify the gating actually holds on GitHub's `ubuntu-latest`,
@@ -117,9 +119,10 @@ commit (where a commit applies), move on. Never batch ticks.
       - Any clippy/fmt drift: fix the code, re-run locally, re-push.
       - Commit each fix on the feature branch with a concise message; every push
         re-triggers CI - verify locally first to avoid burning CI minutes.
-- [ ] Iterate until the `CI` workflow is **green** on GitHub for the feature
-      branch / PR. Record the passing run URL.
-- [ ] Add a CI status badge to the top of `README.md`
+- [x] Iterate until the `CI` workflow is **green** on GitHub for the feature
+      branch / PR. Passing run:
+      https://github.com/webbertakken/stream-deck-linux/actions/runs/30367590823
+- [x] Add a CI status badge to the top of `README.md`
       (`![CI](https://github.com/webbertakken/stream-deck-linux/actions/
       workflows/ci.yml/badge.svg)`), commit, push, and confirm the badge
       resolves to the green run. (Adjust the workflow `name`/path in the badge
@@ -127,26 +130,27 @@ commit (where a commit applies), move on. Never batch ticks.
 
 ## Phase 5 - Open the pull request
 
-- [ ] Open the PR from `feat/hold-key-and-autostart` into `main`:
+- [x] Open the PR from `feat/hold-key-and-autostart` into `main`:
+      https://github.com/webbertakken/stream-deck-linux/pull/1
       `gh pr create --base main --head feat/hold-key-and-autostart --title
       "<=52 char title" --body "<concise bulleted body>"`. Body covers: native
       autostart + dev loop replacing PM2; the `hold = "<key|combo>"` uinput
       latch (safety: kernel releases on fd close); web-editor control; tests
       116; hardware-verified. No wiki/PM2 cross-links, British English, no
       em-dash.
-- [ ] Confirm CI runs on the PR and is green (`gh pr checks`). If red, loop back
+- [x] Confirm CI runs on the PR and is green (`gh pr checks`). If red, loop back
       to Phase 4.
-- [ ] Verify the PR shows the expected diff (feature commits only, no stray
+- [x] Verify the PR shows the expected diff (feature commits only, no stray
       files) and the committed tree matches intent (`gh pr diff --name-only`).
 
 ## Phase 6 - Verify + report
 
-- [ ] Final confirmation: repo is public, `main` is default, CI green on the PR,
+- [x] Final confirmation: repo is public, `main` is default, CI green on the PR,
       badge live, PR open and mergeable.
-- [ ] Update `~/PR_RESULTS.md` (append, max 8 lines): repo published public, CI
+- [x] Update `~/PR_RESULTS.md` (append, max 8 lines): repo published public, CI
       wired and green, PR opened - with the PR URL and passing run URL.
-- [ ] Do NOT merge the PR unless the operator asks; leave it open for review.
-- [ ] Report back with: repo URL, PR URL, CI run URL, and anything the operator
+- [x] Do NOT merge the PR unless the operator asks; leave it open for review.
+- [x] Report back with: repo URL, PR URL, CI run URL, and anything the operator
       must action (e.g. branch protection if desired - that is A2, ask first).
 
 ---
