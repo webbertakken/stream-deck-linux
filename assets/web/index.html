@@ -80,6 +80,7 @@
             <label class="radio"><input type="radio" name="act" value="run" /> Run command</label>
             <label class="radio"><input type="radio" name="act" value="macro" /> Macro (steps)</label>
             <label class="radio"><input type="radio" name="act" value="toggle" /> Toggle (states)</label>
+            <label class="radio"><input type="radio" name="act" value="hold" /> Hold key (latch)</label>
             <label class="radio"><input type="radio" name="act" value="builtin" /> Built-in</label>
 
             <div id="appSearch" class="combo" hidden>
@@ -98,6 +99,7 @@
               <ul id="appResults" class="combo__results" role="listbox" hidden></ul>
             </div>
             <input id="run" type="text" placeholder="e.g. alacritty" hidden />
+            <input id="hold" type="text" placeholder="e.g. ctrl+shift+f" hidden aria-label="Hold key" />
             <textarea id="macro" rows="3" placeholder="one shell command per line" hidden aria-label="Macro steps"></textarea>
             <div id="statesEditor" hidden>
               <div id="statesList"></div>

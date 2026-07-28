@@ -28,6 +28,7 @@ function isEmpty(b) {
       !b.label &&
       !b.run &&
       !b.builtin &&
+      !b.hold &&
       !b.text_color &&
       !b.watch &&
       !(b.macro && b.macro.length) &&
@@ -213,11 +214,13 @@ function populateForm(b) {
   else if (b.run) act = "run";
   else if (b.macro && b.macro.length) act = "macro";
   else if (b.states && b.states.length) act = "toggle";
+  else if (b.hold) act = "hold";
   else if (b.builtin) act = "builtin";
   document.querySelectorAll('input[name="act"]').forEach((r) => {
     r.checked = r.value === act;
   });
   $("run").value = b.run || "";
+  $("hold").value = b.hold || "";
   $("macro").value = (b.macro || []).join("\n");
   renderStates(b.states);
   if (act === "openapp") {
@@ -264,6 +267,7 @@ function syncActionVisibility() {
   $("appSearch").hidden = act !== "openapp";
   if (act !== "openapp") closeAppResults();
   $("run").hidden = act !== "run";
+  $("hold").hidden = act !== "hold";
   $("macro").hidden = act !== "macro";
   $("statesEditor").hidden = act !== "toggle";
   $("builtinRow").hidden = act !== "builtin";
@@ -296,6 +300,9 @@ function readForm() {
   } else if (act === "run") {
     const run = $("run").value.trim();
     if (run) b.run = run;
+  } else if (act === "hold") {
+    const hold = $("hold").value.trim();
+    if (hold) b.hold = hold;
   } else if (act === "macro") {
     const steps = $("macro")
       .value.split("\n")
