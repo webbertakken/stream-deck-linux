@@ -180,10 +180,10 @@ Read these before touching code; they define the seams you will extend.
 
 ## Phase 2 - Config surface: the `hold` field (TDD)
 
-- [ ] Add `hold: Option<String>` to `ButtonConfig` (serde: default,
+- [x] Add `hold: Option<String>` to `ButtonConfig` (serde: default,
       skip_serializing_if None) with a doc comment. Do NOT add it to
       `ButtonState` (D1).
-- [ ] Extend `validate_one()` / the action-count logic so `hold` counts as an
+- [x] Extend `validate_one()` / the action-count logic so `hold` counts as an
       action: a button may set **exactly one** of `run`/`builtin`/`macro`/
       `hold`, and `states` remains mutually exclusive with all of them. A `hold`
       button still needs a visual (image/color/label/watch) - reuse the existing
@@ -193,7 +193,7 @@ Read these before touching code; they define the seams you will extend.
       Tests: valid `hold = "F"`; `hold` + `run` on the same key errors; `hold` +
       `states` errors; `hold` with no visual errors; `hold = "boguskey"` errors;
       `hold = ""` errors; TOML round-trips with `hold`.
-- [ ] `cargo fmt` + clippy + test. Commit.
+- [x] `cargo fmt` + clippy + test. Commit.
 
 ## Phase 3 - Runtime: the hold latch + safe release (TDD)
 

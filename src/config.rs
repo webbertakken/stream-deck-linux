@@ -97,6 +97,11 @@ pub struct ButtonConfig {
     /// visual and action. Mutually exclusive with run/builtin/macro.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub states: Option<Vec<ButtonState>>,
+    /// Hold-a-key latch: a key or `+`-separated combo (e.g. `ctrl+shift+f`)
+    /// held down on first press and released on the next press of the same
+    /// deck key. Mutually exclusive with run/builtin/macro/states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold: Option<String>,
 }
 
 /// One state of a toggle key.
@@ -233,7 +238,11 @@ fn validate_buttons(
                     button.key
                 )));
             }
-            if button.run.is_some() || button.builtin.is_some() || button.macro_steps.is_some() {
+            if button.run.is_some()
+                || button.builtin.is_some()
+                || button.macro_steps.is_some()
+                || button.hold.is_some()
+            {
                 return Err(Error::ConfigInvalid(format!(
                     "key {} sets both states and another action",
                     button.key
@@ -269,15 +278,20 @@ fn validate_one(button: &ButtonConfig, page_count: usize, names: &[Option<String
         button.run.is_some(),
         button.builtin.is_some(),
         button.macro_steps.is_some(),
+        button.hold.is_some(),
     ]
     .iter()
     .filter(|set| **set)
     .count();
     if action_count > 1 {
         return Err(Error::ConfigInvalid(format!(
-            "key {} sets more than one action (run/builtin/macro)",
+            "key {} sets more than one action (run/builtin/macro/hold)",
             button.key
         )));
+    }
+    if let Some(spec) = &button.hold {
+        // Parse now so a bad key name fails at load, not silently at press time.
+        crate::keyboard::parse_keys(spec)?;
     }
     if let Some(steps) = &button.macro_steps {
         if steps.iter().all(|s| s.trim().is_empty()) {
@@ -540,6 +554,74 @@ run = "amixer set Master toggle"
             .validate(&Model::MK2)
             .unwrap_err();
         assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("macro has no steps")));
+    }
+
+    #[test]
+    fn validate_accepts_hold_button() {
+        let config =
+            Config::from_toml_str("[[buttons]]\nkey = 0\nlabel = \"Hold F\"\nhold = \"F\"\n")
+                .unwrap();
+        assert!(config.validate(&Model::MK2).is_ok());
+        assert_eq!(config.buttons[0].hold.as_deref(), Some("F"));
+    }
+
+    #[test]
+    fn validate_rejects_hold_with_run() {
+        let toml = "[[buttons]]\nkey = 0\nlabel = \"x\"\nhold = \"f\"\nrun = \"true\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("more than one action")));
+    }
+
+    #[test]
+    fn validate_rejects_hold_with_states() {
+        let toml =
+            "[[buttons]]\nkey = 0\nhold = \"f\"\n[[buttons.states]]\nlabel = \"A\"\ncolor = \"#111111\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::ConfigInvalid(m) if m.contains("both states and another action"))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_hold_without_visual() {
+        let config = Config::from_toml_str("[[buttons]]\nkey = 0\nhold = \"f\"\n").unwrap();
+        let err = config.validate(&Model::MK2).unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color")));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_hold_key() {
+        let config =
+            Config::from_toml_str("[[buttons]]\nkey = 0\nlabel = \"x\"\nhold = \"boguskey\"\n")
+                .unwrap();
+        let err = config.validate(&Model::MK2).unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("unknown key name")));
+    }
+
+    #[test]
+    fn validate_rejects_empty_hold() {
+        let config =
+            Config::from_toml_str("[[buttons]]\nkey = 0\nlabel = \"x\"\nhold = \"\"\n").unwrap();
+        let err = config.validate(&Model::MK2).unwrap_err();
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("empty")));
+    }
+
+    #[test]
+    fn toml_round_trips_with_hold() {
+        let config = Config::from_toml_str(
+            "[[buttons]]\nkey = 0\nlabel = \"Hold\"\nhold = \"ctrl+shift+f\"\n",
+        )
+        .unwrap();
+        let serialised = config.to_toml_string().unwrap();
+        assert!(serialised.contains("hold = \"ctrl+shift+f\""));
+        let reparsed = Config::from_toml_str(&serialised).unwrap();
+        assert_eq!(config, reparsed);
     }
 
     #[test]
