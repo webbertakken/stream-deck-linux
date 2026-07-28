@@ -139,15 +139,15 @@ Read these before touching code; they define the seams you will extend.
 
 ## Phase 1 - Keyboard emitter (uinput) + keycode map (TDD, pure where possible)
 
-- [ ] New module `src/keyboard.rs` (add `pub mod keyboard;` to `src/lib.rs`).
-- [ ] Define `KeyCode(u16)` (Linux evdev code) and a **pure** `parse_keys(spec:
+- [x] New module `src/keyboard.rs` (add `pub mod keyboard;` to `src/lib.rs`).
+- [x] Define `KeyCode(u16)` (Linux evdev code) and a **pure** `parse_keys(spec:
       &str) -> Result<Vec<KeyCode>>` that splits on `+`, trims, lower-cases
       names, maps each to its evdev code, and preserves order (modifiers as
       written). Reject empty spec and unknown names with `Error::ConfigInvalid`.
       Tests: single key (`f` -> `KEY_F`=33), combo (`ctrl+shift+f` -> ctrl,
       shift, f codes in order), case-insensitive, aliases (`ctrl`==`control`,
       `esc`==`escape`, `enter`==`return`), unknown name errors, empty errors.
-- [ ] Key-name table (default coverage set - A3): letters `a`-`z`, digits
+- [x] Key-name table (default coverage set - A3): letters `a`-`z`, digits
       `0`-`9`, `f1`-`f12`, modifiers `ctrl`/`control`, `shift`, `alt`,
       `super`/`meta`/`win` (LEFTMETA), `altgr` (RIGHTALT); `space`, `enter`/
       `return`, `tab`, `esc`/`escape`, `backspace`, `delete`, `insert`, `home`,
@@ -155,14 +155,14 @@ Read these before touching code; they define the seams you will extend.
       `equal`, `comma`, `dot`/`period`, `slash`, `semicolon`. Keep the table a
       single source of truth (a `match` or a static slice), tested for a
       representative subset. Document how to extend it.
-- [ ] Define `trait KeyEmitter { fn key_down(&mut self, code: KeyCode) ->
+- [x] Define `trait KeyEmitter { fn key_down(&mut self, code: KeyCode) ->
       Result<()>; fn key_up(&mut self, code: KeyCode) -> Result<()>; fn
       release_all(&mut self) -> Result<()>; }` (the trait tracks or is told
       which are held; `release_all` is the safety valve).
-- [ ] `RecordingEmitter` (test-only, behind `#[cfg(test)]` or a small pub
+- [x] `RecordingEmitter` (test-only, behind `#[cfg(test)]` or a small pub
       test util): records a `Vec<(&'static str, KeyCode)>` of down/up calls, so
       the runtime latch can be unit-tested without hardware.
-- [ ] `UinputKeyboard` (real): opens `/dev/uinput`, `UI_SET_EVBIT(EV_KEY)`,
+- [x] `UinputKeyboard` (real): opens `/dev/uinput`, `UI_SET_EVBIT(EV_KEY)`,
       `UI_SET_KEYBIT` for every code the app can emit (the whole table, so any
       configured hold works), `UI_DEV_SETUP`+`UI_DEV_CREATE`, then emits
       `input_event { EV_KEY, code, value }` + `EV_SYN/SYN_REPORT` for down(1)/
@@ -171,12 +171,12 @@ Read these before touching code; they define the seams you will extend.
       `UI_DEV_DESTROY` + close (kernel also releases on fd close - belt and
       braces). Use `libc` ioctls in the `hid.rs` style; define the needed
       `UI_*` request constants and `input_event`/`uinput_setup` structs.
-- [ ] Gate the real-device test behind availability of a writable `/dev/uinput`
+- [x] Gate the real-device test behind availability of a writable `/dev/uinput`
       (skip with a clear message otherwise) so CI without uinput still passes.
       This test: create device, emit a keydown+keyup, assert no error; it is a
       smoke test, not an assertion on downstream focus.
-- [ ] `cargo fmt` + `cargo clippy --all-targets -- -D warnings` + `cargo test`.
-- [ ] Commit.
+- [x] `cargo fmt` + `cargo clippy --all-targets -- -D warnings` + `cargo test`.
+- [x] Commit.
 
 ## Phase 2 - Config surface: the `hold` field (TDD)
 
