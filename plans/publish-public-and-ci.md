@@ -78,24 +78,24 @@ commit (where a commit applies), move on. Never batch ticks.
 
 ## Phase 2 - Create the public GitHub repo + remote
 
-- [ ] Create the repo without pushing yet:
+- [x] Create the repo without pushing yet:
       `gh repo create webbertakken/stream-deck-linux --public
       --description "<desc>" --source . --remote origin` (or create then
       `git remote add origin https://github.com/webbertakken/stream-deck-linux.git`).
       Pick the flag combination that creates an **empty** public repo and wires
       `origin`, without auto-pushing an unintended branch. Verify with
       `git remote -v` and `gh repo view --json visibility,name,owner`.
-- [ ] Confirm visibility is **public** (`gh repo view --json visibility`).
-- [ ] Set repository description and topics (A1 defaults). Verify.
+- [x] Confirm visibility is **public** (`gh repo view --json visibility`).
+- [x] Set repository description and topics (A1 defaults). Verify.
 
 ## Phase 3 - Push base and feature branches
 
-- [ ] Push `main` first so the PR has a base:
+- [x] Push `main` first so the PR has a base:
       `git push -u origin main`. Verify the branch appears on GitHub and that
       GitHub set `main` as the default branch (set it if not).
-- [ ] Push the feature branch:
+- [x] Push the feature branch:
       `git push -u origin feat/hold-key-and-autostart`. Verify.
-- [ ] Confirm no other local branches leak (only `main` +
+- [x] Confirm no other local branches leak (only `main` +
       `feat/hold-key-and-autostart` should be on the remote).
 
 ## Phase 4 - CI: make it run and go green on GitHub

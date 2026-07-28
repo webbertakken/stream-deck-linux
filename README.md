@@ -1,5 +1,7 @@
 # stream-deck-linux
 
+[![CI](https://github.com/webbertakken/stream-deck-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/webbertakken/stream-deck-linux/actions/workflows/ci.yml)
+
 Custom Linux control software for the Elgato Stream Deck, written in Rust.
 Assign every key a **picture** and a **function** from a simple TOML file.
 
