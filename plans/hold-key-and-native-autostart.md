@@ -266,19 +266,19 @@ Read these before touching code; they define the seams you will extend.
 
 ## Phase 6 - Docs, examples, decisions
 
-- [ ] `README.md`: document the `hold` field in the Button fields table and the
+- [x] `README.md`: document the `hold` field in the Button fields table and the
       "exactly one action" rule (add `hold` to the mutually-exclusive set);
       add a short "Hold a key (latch)" subsection with the `ctrl+shift+f`
       example and the note that it uses a virtual uinput keyboard (works on X11
       + Wayland, needs `/dev/uinput` access - give the udev rule for machines
       that lack the ACL: e.g. a `uinput` group + `KERNEL=="uinput",
       GROUP="uinput", MODE="0660"` rule, or `uaccess`).
-- [ ] `examples/`: add a small example config (or extend `showcase.toml`) with a
+- [x] `examples/`: add a small example config (or extend `showcase.toml`) with a
       hold key, so `streamdeck run examples/<file>` demonstrates it.
-- [ ] `DECISIONS.md`: record the uinput-over-xdotool decision (safety +
+- [x] `DECISIONS.md`: record the uinput-over-xdotool decision (safety +
       portability + fit) and the native-autostart-over-PM2 decision.
-- [ ] Update `README.md` Development section if not already done in Phase 0.
-- [ ] Commit.
+- [x] Update `README.md` Development section if not already done in Phase 0.
+- [x] Commit.
 
 ## Phase 7 - Verify on hardware + fold-back
 

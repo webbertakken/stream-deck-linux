@@ -1,4 +1,5 @@
-# Showcase of the newer features: pages, live keys, toggles, macros, built-ins.
+# Showcase of the newer features: pages, live keys, toggles, macros, built-ins,
+# and a hold-key latch.
 brightness = 70
 
 [[pages]]
@@ -38,9 +39,17 @@ color = "#1e66f5"
 label = "Vol +"
 builtin = "volume_up"
 
-# Page navigation.
+# Hold key: press to hold Ctrl+Shift+F down, press again to release. Shows a
+# persistent highlight while latched on.
 [[pages.buttons]]
 key = 4
+color = "#585b70"
+label = "Hold"
+hold = "ctrl+shift+f"
+
+# Page navigation.
+[[pages.buttons]]
+key = 5
 color = "#6c6f85"
 label = "Tools >"
 builtin = "page:tools"
