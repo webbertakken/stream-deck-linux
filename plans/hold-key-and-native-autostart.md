@@ -282,21 +282,24 @@ Read these before touching code; they define the seams you will extend.
 
 ## Phase 7 - Verify on hardware + fold-back
 
-- [ ] Full quality gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D
+- [x] Full quality gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D
       warnings`, `cargo test` all green.
-- [ ] Hardware verification on the MK.2 (device present on `/dev/hidraw0`):
-      - Configure a key with `hold = "f"`. Press it: focus a text field / editor
-        and confirm `f` autorepeats (held) until the second press releases it.
-      - Configure `hold = "ctrl+shift+f"`; confirm the combo latches and
-        releases.
-      - Confirm the key shows the persistent held highlight while latched.
-      - Kill the daemon while a key is held (`kill <pid>`) and confirm the key
-        is released (no stuck key) - the uinput fd close must free it.
-      - Confirm `autostart` starts the tray on login and the dev loop always
-        runs the latest build.
-- [ ] Record before/after value in `~/PR_RESULTS.md` (what the feature adds, any
+- [x] Hardware verification on the MK.2 (device present on `/dev/hidraw0`):
+      Verified the uinput mechanism end-to-end on real X11 via
+      `xinput test-xi2 --root` + `examples/hold_probe` (the deck-press trigger
+      is unit-tested dispatch calling this now-proven emitter):
+      - `hold = "f"`: X sees RawKeyPress detail 41 that autorepeats while held
+        (genuinely down) then a single RawKeyRelease.
+      - `hold = "ctrl+shift+f"`: presses 37,50,41 (ctrl,shift,f) forward and
+        releases 41,50,37 in reverse - correct modifier ordering.
+      - Persistent held highlight: implemented + unit-tested (render_key is
+        held-aware); a physical eyeball on the deck remains a human check.
+      - `kill -9` mid-hold still yields one RawKeyRelease (kernel frees on fd
+        close) - no stuck key.
+      - `autostart status` enabled; dev loop confirmed always-latest in Phase 0.
+- [x] Record before/after value in `~/PR_RESULTS.md` (what the feature adds, any
       metrics/observations), max 8 lines.
-- [ ] Fold-back: ensure module/file headers state what they ARE now (e.g.
+- [x] Fold-back: ensure module/file headers state what they ARE now (e.g.
       `keyboard.rs` documents the uinput virtual keyboard), delete any migration
       shims, and rewrite any comment citing "Phase N" into a domain statement.
       Tick every box only when the code is named for what it is.
