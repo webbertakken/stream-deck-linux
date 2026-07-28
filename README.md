@@ -19,6 +19,8 @@ HID report descriptor, not guessed.
   or a device **built-in** (brightness, media, volume, open, page switch).
 - **Multi-page layouts**, **toggle / multi-state keys**, and **live keys**
   whose label is refreshed from a command (clock, stats, ...).
+- **Hold-a-key latch**: press to hold a keyboard key/combo down, press again to
+  release, via a virtual uinput keyboard (X11 + Wayland).
 - **Press feedback**: keys highlight while held.
 - A single **TOML config** describes the whole layout.
 - A **system tray** (StatusNotifierItem) with quick actions and a daemon.
@@ -143,9 +145,10 @@ builtin = "brightness_up"   # device-native action instead of `run`
 | `watch`      | Command whose stdout becomes the key label (a live key).       |
 | `interval`   | Refresh seconds for `watch` (default 5).                       |
 | `states`     | Toggle key: states cycled on press (each w/ visual + action).  |
+| `hold`       | Hold a keyboard key/combo down; next press releases (a latch). |
 
-Exactly one action per key (`run` / `builtin` / `macro` / `states`); a key
-needs at least one of `image`, `color`, `label` or `watch`. Top-level options:
+Exactly one action per key (`run` / `builtin` / `macro` / `hold` / `states`); a
+key needs at least one of `image`, `color`, `label` or `watch`. Top-level options:
 `brightness` (0-100) and `press_feedback` (highlight a key while pressed,
 default true).
 
@@ -164,6 +167,50 @@ default true).
 | `page_next/prev`     | Switch pages (wraps).                   |
 | `page:<name\|index>` | Switch to a specific page.              |
 | `reset`              | Reset device to its standby logo.       |
+
+### Hold a key (latch)
+
+A `hold` key presses a keyboard key (or combo) **down and keeps it held** on the
+first press, and **releases** it on the next press of the same deck key. Useful
+for push-to-talk, sprint-toggles in games, or holding a modifier.
+
+```toml
+[[buttons]]
+key = 0
+label = "Sprint"
+color = "#444466"
+hold = "shift"          # latch: press to hold Shift, press again to release
+
+[[buttons]]
+key = 1
+label = "C+S+F"
+color = "#334455"
+hold = "ctrl+shift+f"   # combos with `+`; modifiers press first, release last
+```
+
+While latched on, the key shows a persistent highlight. Key names are
+case-insensitive: letters `a`-`z`, digits `0`-`9`, `f1`-`f12`, `ctrl`/`control`,
+`shift`, `alt`, `super`/`meta`/`win`, `altgr`, `space`, `enter`/`return`, `tab`,
+`esc`/`escape`, `backspace`, `delete`, `insert`, `home`, `end`, `pageup`,
+`pagedown`, arrows, `minus`, `equal`, `comma`, `dot`/`period`, `slash`,
+`semicolon`.
+
+Holds are emitted through a pure-Rust **virtual uinput keyboard**, so they
+deliver real key events on **both X11 and Wayland** (games and raw-input apps
+see them too). If the daemon crashes or is stopped while a key is held, the
+kernel auto-releases it when the device closes, so a key is never left stuck.
+
+This needs write access to `/dev/uinput`. On many desktops your login session
+already has it (check with `getfacl /dev/uinput`). If not, add a udev rule:
+
+```
+# /etc/udev/rules.d/71-uinput.rules
+KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"
+```
+
+Then `sudo groupadd -f uinput && sudo usermod -aG uinput "$USER"`, reload rules
+(`sudo udevadm control --reload-rules && sudo udevadm trigger`) and re-log in.
+Alternatively a `TAG+="uaccess"` rule grants the active session access.
 
 ### Pages, macros, live keys and toggles
 
@@ -185,6 +232,8 @@ all of this: page tabs, fuzzy app search, toggle states, live and macro keys.
 - `device` - the high-level `StreamDeck` API.
 - `config` / `actions` / `runtime` - the TOML layout, action model, and the
   control-aware render + press-to-action daemon loop.
+- `keyboard` - a pure-Rust virtual uinput keyboard for hold-key latches (raw
+  `ioctl`/`write`, like `hid`), with a pure key-name -> evdev keycode map.
 - `tray` / `webui` / `autostart` - the desktop integration: a `ksni` tray, an
   in-process `tiny_http` editor, and login autostart.
 
