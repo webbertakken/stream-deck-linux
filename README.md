@@ -197,6 +197,29 @@ cargo fmt --check
 cargo run --example preview   # writes a contact sheet PNG of composed keys
 ```
 
+### Running on boot and the always-latest dev loop
+
+- **Boot**: `streamdeck autostart enable` writes
+  `~/.config/autostart/streamdeck.desktop` whose `Exec` is an **absolute path**
+  to the current binary running `tray`. If you move or rebuild the binary to a
+  different path, re-run `autostart enable` so the entry points at it again.
+- **Dev loop**: `scripts/dev.sh` rebuilds `--release` and relaunches
+  `streamdeck tray` on every change under `src/` or `assets/`, so the running
+  instance is always the latest build. It stops the previous instance first,
+  because the single HID device and the fixed web port cannot be shared.
+  Requires `cargo watch` (`cargo install cargo-watch`); the script prints an
+  install hint and exits if it is missing.
+
+```bash
+scripts/dev.sh          # watch + rebuild + restart on change
+scripts/dev.sh --once   # build once, replace the running instance, and run
+```
+
+The autostarted instance and the dev loop must **not** run at the same time
+(they would fight over the HID device and web port). `scripts/dev.sh` stops any
+running `streamdeck tray` before launching its own, so start the dev loop and it
+takes over from the autostarted one.
+
 ## Licence
 
 Project code is MIT (see `LICENSE`). The bundled font
