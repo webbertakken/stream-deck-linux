@@ -6,6 +6,7 @@
 
 use crate::config::ButtonState;
 use crate::error::{Error, Result};
+use crate::keyboard::KeyCode;
 use crate::system::{Media, Volume};
 
 /// Brightness step applied by `brightness_up` / `brightness_down`.
@@ -106,6 +107,9 @@ pub enum KeyAction {
     Macro(Vec<String>),
     /// Cycle through states on each press (toggle / multi-state key).
     Toggle(Vec<ButtonState>),
+    /// Press-to-toggle latch: hold these keyboard codes down on first press,
+    /// release them on the next press of the same deck key.
+    Hold(Vec<KeyCode>),
 }
 
 #[cfg(test)]
