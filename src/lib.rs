@@ -14,6 +14,7 @@ pub mod events;
 pub mod hid;
 pub mod image;
 pub mod install;
+pub mod keyboard;
 pub mod model;
 pub mod protocol;
 pub mod render;
