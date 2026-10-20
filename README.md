@@ -117,6 +117,24 @@ streamdeck autostart disable
 The generated icons live in `assets/icons/`
 (`cargo run --example gen-icon` regenerates them).
 
+## Control API and CLI client
+
+Programs (scripts, assistants) change the layout through the running daemon, never by writing the
+file: each change is validated, written atomically and shown on the device at once. Every caller holds
+its own token.
+
+```bash
+streamdeck token issue cli                   # once: a token for your own CLI
+streamdeck layout                            # the layout, as JSON, with its revision
+streamdeck schema                            # every key field, built-in and hold key this build knows
+streamdeck key set 0 4 '{"label":"Mail","color":"#223344","run":"thunderbird"}'
+streamdeck key clear 0 4
+streamdeck page add Media
+streamdeck layout brightness 60
+```
+
+The routes, tokens, revisions and named refusals are in [`docs/control-api.md`](docs/control-api.md).
+
 ## Config reference
 
 A config is TOML with an optional `brightness` and a list of `[[buttons]]`.
