@@ -120,6 +120,11 @@ const KEYS: &[(&str, u16)] = &[
 ];
 
 /// Map a single (already lower-cased) key name to its evdev keycode.
+/// Every key name a hold accepts, in table order.
+pub fn key_names() -> Vec<&'static str> {
+    KEYS.iter().map(|(name, _)| *name).collect()
+}
+
 fn keycode_for(name: &str) -> Option<u16> {
     KEYS.iter().find(|(n, _)| *n == name).map(|(_, code)| *code)
 }

@@ -8,7 +8,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use streamdeck::events::diff_states;
+use streamdeck::remote::{self, Problem};
 use streamdeck::runtime::Control;
+use streamdeck::tokens::{self, TokenStore};
 use streamdeck::tray::StreamDeckTray;
 use streamdeck::webui::WebUi;
 use streamdeck::{autostart, install, runtime, Error, Model, StreamDeck};
@@ -18,6 +20,10 @@ static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().map(String::as_str).unwrap_or("help");
+
+    if remote::VERBS.contains(&command) {
+        return cmd_remote(&args);
+    }
 
     let result = match command {
         "list" => cmd_list(),
@@ -34,6 +40,7 @@ fn main() -> ExitCode {
         "install" => cmd_install(),
         "uninstall" => cmd_uninstall(),
         "watch" => cmd_watch(&args),
+        "token" => cmd_token(&args),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -444,6 +451,131 @@ fn print_help() {
          \x20 autostart <enable|disable|status>  manage login autostart\n\
          \x20 install                  install icons + app launcher entry\n\
          \x20 uninstall                remove installed icons + launcher\n\
-         \x20 watch [seconds]          print button press/release events"
+         \x20 watch [seconds]          print button press/release events\n\n\
+         LAYOUT (through the running daemon; docs/control-api.md):\n\
+         \x20 layout                   the layout, as JSON\n\
+         \x20 schema                   what a key may hold, as JSON\n\
+         \x20 layout brightness <0-100>  store and apply brightness\n\
+         \x20 key set <page> <key> <json|->  replace a key whole\n\
+         \x20 key clear <page> <key>   blank a key\n\
+         \x20 page add <name>          append a page\n\
+         \x20 page remove <page>       remove a page\n\
+         \x20 (options: --revision <rev>, --url <url>; env STREAMDECK_URL, STREAMDECK_TOKEN, STREAMDECK_TOKEN_FILE)\n\
+         \x20 token issue <caller> [--out <file>]  mint a caller's token (never printed)\n\
+         \x20 token revoke <caller>    delete a caller's token\n\
+         \x20 token list               name the callers holding a token"
     );
+}
+
+/// The layout verbs: one call to the running daemon. Exit 0 done, 1 failed
+/// before it answered, 2 refused by it (docs/control-api.md).
+fn cmd_remote(args: &[String]) -> ExitCode {
+    match remote_call(args) {
+        Ok(answer) => {
+            println!("{answer}");
+            ExitCode::SUCCESS
+        }
+        Err((code, problem)) => {
+            eprintln!("{}", problem.to_json());
+            ExitCode::from(code)
+        }
+    }
+}
+
+fn remote_call(args: &[String]) -> Result<String, (u8, Problem)> {
+    let failed = |problem: Problem| (1u8, problem);
+    let call = remote::plan(args).map_err(failed)?;
+    let url = call
+        .url
+        .clone()
+        .or_else(|| {
+            std::env::var("STREAMDECK_URL")
+                .ok()
+                .filter(|v| !v.is_empty())
+        })
+        .unwrap_or_else(|| remote::DEFAULT_URL.to_string());
+    let authority = remote::authority(&url).map_err(failed)?;
+    let token = client_token().map_err(failed)?;
+    let body = match call.body.as_deref() {
+        Some("-") => {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
+                .map_err(|e| failed(Problem::new("usage", format!("standard input: {e}"))))?;
+            Some(text)
+        }
+        other => other.map(String::from),
+    };
+    let (status, answer) =
+        remote::send(&authority, &token, &call, body.as_deref()).map_err(failed)?;
+    remote::judge(status, &answer).map_err(|problem| {
+        let code = if problem.name == "unreachable" { 1 } else { 2 };
+        (code, problem)
+    })
+}
+
+/// `$STREAMDECK_TOKEN`, else the file `$STREAMDECK_TOKEN_FILE`, else the `cli` caller's.
+fn client_token() -> Result<String, Problem> {
+    if let Some(token) = std::env::var("STREAMDECK_TOKEN")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        return Ok(token.trim().to_string());
+    }
+    if let Some(file) = std::env::var_os("STREAMDECK_TOKEN_FILE").filter(|v| !v.is_empty()) {
+        return std::fs::read_to_string(&file)
+            .map(|t| t.trim().to_string())
+            .map_err(|e| {
+                Problem::new(
+                    "no-token",
+                    format!("{}: {e}", PathBuf::from(file).display()),
+                )
+            });
+    }
+    TokenStore::new(tokens::default_dir())
+        .read("cli")
+        .map_err(|_| {
+            Problem::new(
+                "no-token",
+                "no token found; issue one with `streamdeck token issue cli`",
+            )
+        })
+}
+
+fn cmd_token(args: &[String]) -> Result<(), Error> {
+    let store = TokenStore::new(tokens::default_dir());
+    let bad = |why: &str| Error::ConfigInvalid(why.to_string());
+    match args.get(1).map(String::as_str) {
+        Some("issue") => {
+            let caller = args
+                .get(2)
+                .ok_or_else(|| bad("token issue <caller> [--out <file>]"))?;
+            let out = match (args.get(3).map(String::as_str), args.get(4)) {
+                (Some("--out"), Some(file)) => Some(PathBuf::from(file)),
+                (None, None) => None,
+                _ => return Err(bad("token issue <caller> [--out <file>]")),
+            };
+            let path = store.issue(caller, out.as_deref())?;
+            println!("issued a token for '{caller}' in {}", path.display());
+            if let Some(out) = out {
+                println!("and wrote the same token to {}", out.display());
+            }
+            Ok(())
+        }
+        Some("revoke") => {
+            let caller = args.get(2).ok_or_else(|| bad("token revoke <caller>"))?;
+            if store.revoke(caller)? {
+                println!("revoked '{caller}'");
+            } else {
+                println!("'{caller}' held no token");
+            }
+            Ok(())
+        }
+        Some("list") => {
+            for caller in store.list()? {
+                println!("{caller}");
+            }
+            Ok(())
+        }
+        _ => Err(bad("token issue|revoke|list")),
+    }
 }

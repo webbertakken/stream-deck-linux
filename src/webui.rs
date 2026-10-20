@@ -12,11 +12,13 @@ use serde::Deserialize;
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::config::Config;
+use crate::control::{self, ApiRequest, ControlApi};
 use crate::error::{Error, Result};
 use crate::guard::{self, RequestFacts};
 use crate::model::Model;
 use crate::render;
 use crate::runtime::Control;
+use crate::tokens::{self, TokenStore};
 
 const INDEX_HTML: &str = include_str!("../assets/web/index.html");
 const APP_JS: &str = include_str!("../assets/web/app.js");
@@ -31,6 +33,7 @@ pub struct WebUi {
     control: Sender<Control>,
     addr: String,
     port: u16,
+    api: ControlApi,
 }
 
 #[derive(Deserialize)]
@@ -55,15 +58,28 @@ impl WebUi {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        let api = ControlApi {
+            config_path: config_path.clone(),
+            model,
+            tokens: TokenStore::new(tokens::default_dir()),
+            control: control.clone(),
+        };
         Ok(Self {
             server,
             model,
             config_path,
             base_dir,
             control,
+            api,
             addr: ip.to_string(),
             port: ip.port(),
         })
+    }
+
+    /// Read caller tokens from `store` instead of the default directory.
+    pub fn with_tokens(mut self, store: TokenStore) -> Self {
+        self.api.tokens = store;
+        self
     }
 
     /// The URL the editor is reachable at.
@@ -123,6 +139,12 @@ impl WebUi {
             );
         }
 
+        if path.starts_with(control::PREFIX) {
+            let authorization = header("Authorization");
+            let if_match = header("If-Match");
+            return self.serve_control(request, path.to_string(), authorization, if_match);
+        }
+
         match (&method, path) {
             (Method::Get, "/") => respond(
                 request,
@@ -147,6 +169,34 @@ impl WebUi {
             (Method::Get, p) if p.starts_with("/api/preview/") => self.get_preview(request, p),
             _ => respond(request, 404, "text/plain", b"not found"),
         }
+    }
+
+    fn serve_control(
+        &self,
+        mut request: Request,
+        path: String,
+        authorization: Option<String>,
+        if_match: Option<String>,
+    ) -> Result<()> {
+        let mut body = String::new();
+        if let Err(err) = request.as_reader().read_to_string(&mut body) {
+            let refusal = serde_json::json!({ "error": "bad-json", "detail": err.to_string() });
+            return respond(
+                request,
+                400,
+                "application/json",
+                refusal.to_string().as_bytes(),
+            );
+        }
+        let answer = self.api.handle(&ApiRequest {
+            method: request.method().as_str().to_uppercase(),
+            path,
+            authorization,
+            if_match,
+            body,
+        });
+        let bytes = serde_json::to_vec(&answer.body).map_err(|e| Error::Web(e.to_string()))?;
+        respond(request, answer.status, "application/json", &bytes)
     }
 
     fn load_config(&self) -> Config {
