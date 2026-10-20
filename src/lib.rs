@@ -11,6 +11,7 @@ pub mod config;
 pub mod device;
 pub mod error;
 pub mod events;
+pub mod guard;
 pub mod hid;
 pub mod image;
 pub mod install;
