@@ -101,6 +101,12 @@ streamdeck autostart disable
   apply **live** - there is no Save button; every change renders on the device
   and is written to the config immediately. Each tile previews exactly what the
   device shows.
+- **Editor guard**: a key's action can run shell commands, so the editor's
+  server refuses any request not addressed to it as `127.0.0.1:<port>` or
+  `localhost:<port>` (`foreign-host`, against DNS rebinding), any request from
+  another web origin (`foreign-origin`), and any write not sent as
+  `application/json` (`not-json`, so a page cannot send one without a CORS
+  preflight the server never grants). Each refusal is logged.
 - **Open application**: the editor lists installed desktop apps; choose one and
   the key launches it (via `gtk-launch`), auto-filling the label and, when a
   raster icon is found, the key image.

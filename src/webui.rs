@@ -13,6 +13,7 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::guard::{self, RequestFacts};
 use crate::model::Model;
 use crate::render;
 use crate::runtime::Control;
@@ -29,6 +30,7 @@ pub struct WebUi {
     base_dir: PathBuf,
     control: Sender<Control>,
     addr: String,
+    port: u16,
 }
 
 #[derive(Deserialize)]
@@ -45,11 +47,10 @@ impl WebUi {
         control: Sender<Control>,
     ) -> Result<Self> {
         let server = Server::http(addr).map_err(|err| Error::Web(err.to_string()))?;
-        let resolved = server
+        let ip = server
             .server_addr()
             .to_ip()
-            .map(|a| a.to_string())
-            .unwrap_or_else(|| addr.to_string());
+            .ok_or_else(|| Error::Web(format!("{addr} is not an IP address")))?;
         let base_dir = config_path
             .parent()
             .map(Path::to_path_buf)
@@ -60,7 +61,8 @@ impl WebUi {
             config_path,
             base_dir,
             control,
-            addr: resolved,
+            addr: ip.to_string(),
+            port: ip.port(),
         })
     }
 
@@ -92,6 +94,34 @@ impl WebUi {
         let method = request.method().clone();
         let url = request.url().to_string();
         let path = url.split('?').next().unwrap_or("/");
+
+        let header = |name: &'static str| {
+            request
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv(name))
+                .map(|h| h.value.as_str().to_string())
+        };
+        let (host, origin, content_type) =
+            (header("Host"), header("Origin"), header("Content-Type"));
+        let facts = RequestFacts {
+            is_write: !matches!(method, Method::Get | Method::Head),
+            host: host.as_deref(),
+            origin: origin.as_deref(),
+            content_type: content_type.as_deref(),
+        };
+        if let Err(refusal) = guard::admit(&facts, self.port) {
+            eprintln!(
+                "web ui: refused {method} {path}: {} (host={host:?} origin={origin:?})",
+                refusal.name()
+            );
+            return respond(
+                request,
+                refusal.status(),
+                "text/plain",
+                refusal.name().as_bytes(),
+            );
+        }
 
         match (&method, path) {
             (Method::Get, "/") => respond(
