@@ -477,6 +477,7 @@ fn print_help() {
          LAYOUT (through the running daemon; docs/control-api.md):\n\
          \x20 layout                   the layout, as JSON\n\
          \x20 schema                   what a key may hold, as JSON\n\
+         \x20 view                     what the deck shows now, as JSON (keys as PNG)\n\
          \x20 layout brightness <0-100>  store and apply brightness\n\
          \x20 key set <page> <key> <json|->  replace a key whole\n\
          \x20 key clear <page> <key>   blank a key\n\
