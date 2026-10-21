@@ -17,6 +17,10 @@ HID report descriptor, not guessed.
 
 - Per-key **pictures** (PNG/JPEG, auto-resized), **solid colours**, and
   **centred text labels** (with a bundled font), or any combination.
+- Per-key **icons** by name from the [Lucide](https://lucide.dev) set (embedded
+  in the binary), tinted in the label colour and searchable by word.
+- A written **design language** ([`docs/style.md`](docs/style.md)): a palette
+  for what keys do, with label, icon and layout rules programs can read.
 - Per-key **functions**: run a shell command, a **macro** (command sequence),
   or a device **built-in** (brightness, media, volume, open, page switch).
 - **Multi-page layouts**, **toggle / multi-state keys**, and **live keys**
@@ -97,7 +101,9 @@ streamdeck autostart disable
   embedded app icon, so it works on KDE, GNOME (with an SNI extension),
   Cinnamon/XApp and other SNI hosts.
 - **Web editor**: served locally (e.g. `http://127.0.0.1:NNNNN`). Pick a key to
-  set its label, text colour, background colour, image path and action. Edits
+  set its label, icon (searched as you type, with a preview), text colour,
+  background colour (the style's palette is offered as named swatches), image
+  path and action. Edits
   apply **live** - there is no Save button; every change renders on the device
   and is written to the config immediately. Each tile previews exactly what the
   device shows.
@@ -128,13 +134,39 @@ streamdeck token issue cli                   # once: a token for your own CLI
 streamdeck layout                            # the layout, as JSON, with its revision
 streamdeck schema                            # every key field, built-in and hold key this build knows
 streamdeck view                              # what the deck shows now: page, brightness, each key as a PNG
-streamdeck key set 0 4 '{"label":"Mail","color":"#223344","run":"thunderbird"}'
+streamdeck icons play                        # icons a key may show, best matches first (no token needed)
+streamdeck style                             # the palette and the label, icon and layout rules (no token needed)
+streamdeck key set 0 4 '{"icon":"mail","label":"Mail","color":"#2E5A88","run":"thunderbird"}'
 streamdeck key clear 0 4
 streamdeck page add Media
 streamdeck layout brightness 60
 ```
 
-The routes, the live view, tokens, revisions and named refusals are in [`docs/control-api.md`](docs/control-api.md).
+The routes, the live view, icons, the style, tokens, revisions and named refusals are in
+[`docs/control-api.md`](docs/control-api.md).
+
+## Icons and style
+
+A key's `icon` is a [Lucide](https://lucide.dev) icon by name. It is drawn centred in the key's
+`text_color` (white by default) over its `color`; with a `label` the icon sits above a smaller label,
+without one it fills more of the key. Toggle `states` take an `icon` each too.
+
+```toml
+[[buttons]]
+key = 0
+icon = "mail"
+label = "Mail"
+color = "#2E5A88"
+run = "thunderbird"
+```
+
+- Find names with `streamdeck icons <words>` (Lucide's names and tags, best first) or the editor's
+  icon search.
+- An unknown name is refused with close ones: `unknown icon 'mial'; did you mean mail?`. A key shows
+  an `image` or an `icon`, never both.
+- The icons are embedded in the binary at build time; the daemon reads no icon files.
+- How keys should look (the palette, and how to word labels, choose icons and place keys) is in
+  [`docs/style.md`](docs/style.md), and as data from `streamdeck style`.
 
 ## Config reference
 
@@ -163,6 +195,7 @@ builtin = "brightness_up"   # device-native action instead of `run`
 | ------------ | -------------------------------------------------------------- |
 | `key`        | Hardware key index (required).                                 |
 | `image`      | Picture file; relative paths resolve next to the config file.  |
+| `icon`       | A Lucide icon by name, tinted in `text_color`; not with `image`. |
 | `color`      | Solid background `#RRGGBB` (used if no image, or as text bg).   |
 | `label`      | Centred text, auto-shrunk to fit; drawn over the background.   |
 | `text_color` | Label colour `#RRGGBB` (default white).                        |
@@ -175,7 +208,7 @@ builtin = "brightness_up"   # device-native action instead of `run`
 | `hold`       | Hold a keyboard key/combo down; next press releases (a latch). |
 
 Exactly one action per key (`run` / `builtin` / `macro` / `hold` / `states`); a
-key needs at least one of `image`, `color`, `label` or `watch`. Top-level options:
+key needs at least one of `image`, `icon`, `color`, `label` or `watch`. Top-level options:
 `brightness` (0-100) and `press_feedback` (highlight a key while pressed,
 default true).
 
@@ -255,7 +288,11 @@ all of this: page tabs, fuzzy app search, toggle states, live and macro keys.
   device info, plain `read`/`write` for input/output reports).
 - `model` - per-device key grid and image spec (size, format, orientation).
 - `image` / `render` - fit, orient and encode key images; compose backgrounds
-  with centred text.
+  with an icon and centred text.
+- `icons` - the embedded Lucide set (a table `build.rs` generates from
+  `assets/lucide`): lookup with close names, word search, and drawing through
+  `resvg`.
+- `style` - the design language as data, held to `docs/style.md` by its tests.
 - `device` - the high-level `StreamDeck` API.
 - `view` - the frame of what the device shows, shared by the daemon with the control API.
 - `config` / `actions` / `runtime` - the TOML layout, action model, and the
@@ -272,7 +309,20 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo run --example preview   # writes a contact sheet PNG of composed keys
+cargo run --example editor_sandbox -- /tmp/sandbox.toml   # the editor over a scratch config, no deck
 ```
+
+### Updating the icons
+
+The Lucide icons live in `assets/lucide/`: the SVGs, Lucide's tags and licence, the version, the
+archive's sha256 (`SOURCE`) and a sha256 per file (`SHA256SUMS`, checked in CI). To move to another
+release:
+
+```bash
+scripts/update-lucide.sh 1.61.0   # fetch, verify against npm's sha512, and vendor that version
+```
+
+The script is reproducible: the same version writes the same files, byte for byte.
 
 ### Running on boot and the always-latest dev loop
 
@@ -301,4 +351,5 @@ takes over from the autostarted one.
 
 Project code is MIT (see `LICENSE`). The bundled font
 `assets/LiberationSans-Regular.ttf` is licensed under SIL OFL 1.1
-(`assets/LiberationSans-LICENSE.txt`).
+(`assets/LiberationSans-LICENSE.txt`). The Lucide icons in `assets/lucide/` are
+ISC, some derived from Feather under MIT (`assets/lucide/LICENSE`).
