@@ -33,6 +33,11 @@ fn main() {
     writeln!(table, "/// Every icon, sorted by name.").unwrap();
     writeln!(table, "pub static ICONS: &[Icon] = &[").unwrap();
     for (name, tags) in &tags {
+        assert!(
+            tags.iter().all(|tag| !tag.contains('\n')),
+            "a tag of '{name}' holds a newline, which separates tags"
+        );
+        let tags = tags.join("\n");
         let svg = icons_dir.join(format!("{name}.svg"));
         assert!(
             svg.is_file(),
@@ -42,7 +47,7 @@ fn main() {
         let svg = svg.to_str().expect("a UTF-8 path");
         writeln!(
             table,
-            "    Icon {{ name: {name:?}, svg: include_bytes!({svg:?}), tags: &{tags:?} }},"
+            "    Icon {{ name: {name:?}, svg: include_bytes!({svg:?}), tags: {tags:?} }},"
         )
         .unwrap();
     }

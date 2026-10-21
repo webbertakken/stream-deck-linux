@@ -13,7 +13,16 @@ use serde_json::{json, Value};
 pub struct Icon {
     pub name: &'static str,
     pub svg: &'static [u8],
-    pub tags: &'static [&'static str],
+    /// The tags, one per line: one string per icon keeps the embedded table
+    /// (and its relocations) small.
+    tags: &'static str,
+}
+
+impl Icon {
+    /// Lucide's tags for this icon.
+    pub fn tags(&self) -> impl Iterator<Item = &'static str> {
+        self.tags.split('\n').filter(|tag| !tag.is_empty())
+    }
 }
 
 include!(concat!(env!("OUT_DIR"), "/lucide.rs"));
@@ -108,7 +117,7 @@ impl Found {
         let icons: Vec<Value> = self
             .icons
             .iter()
-            .map(|icon| json!({ "name": icon.name, "tags": icon.tags }))
+            .map(|icon| json!({ "name": icon.name, "tags": icon.tags().collect::<Vec<_>>() }))
             .collect();
         json!({ "total": self.total, "icons": icons })
     }
@@ -135,10 +144,9 @@ fn match_of(icon: &Icon, words: &[String]) -> Option<Match> {
         Some(Match::NameParts)
     } else if words.iter().all(|w| icon.name.contains(w.as_str())) {
         Some(Match::InName)
-    } else if words
-        .iter()
-        .all(|w| icon.name.contains(w.as_str()) || icon.tags.iter().any(|t| t.contains(w.as_str())))
-    {
+    } else if words.iter().all(|w| {
+        icon.name.contains(w.as_str()) || icon.tags().any(|t| t.to_lowercase().contains(w.as_str()))
+    }) {
         Some(Match::InTags)
     } else {
         None
@@ -216,7 +224,8 @@ mod tests {
     fn finds_an_icon_by_its_exact_name() {
         let mail = find("mail").unwrap();
         assert_eq!(mail.name, "mail");
-        assert!(mail.tags.contains(&"email"));
+        assert!(mail.tags().any(|tag| tag == "email"));
+        assert!(find("a-arrow-down").unwrap().tags().count() > 1);
         assert!(find("Mail").is_none());
         assert!(find("").is_none());
     }
@@ -287,6 +296,11 @@ mod tests {
         let email = search("email");
         assert!(names(&email).contains(&"mail"), "email is mail's tag");
         assert_eq!(search("zzqqxx").total, 0);
+        let any_case = search("\u{f8}");
+        assert!(
+            any_case.total > 0,
+            "a tag in capitals matches a word in lower case"
+        );
     }
 
     #[test]
