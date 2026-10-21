@@ -18,7 +18,7 @@ pub const DEFAULT_URL: &str = "http://127.0.0.1:57617";
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The verbs this module answers; `main` routes these words here.
-pub const VERBS: &[&str] = &["layout", "schema", "view", "key", "page"];
+pub const VERBS: &[&str] = &["layout", "schema", "view", "key", "page", "icons", "style"];
 
 /// One request to the control API.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,14 @@ pub struct Call {
     pub body: Option<String>,
     pub revision: Option<String>,
     pub url: Option<String>,
+}
+
+impl Call {
+    /// Whether the route answers without a token (`icons`, `style`).
+    pub fn is_open(&self) -> bool {
+        let path = self.path.split('?').next().unwrap_or_default();
+        crate::control::parse_route(self.method, path).is_some_and(|r| r.is_open())
+    }
 }
 
 /// A failure before the daemon answered, or the daemon's refusal.
@@ -94,6 +102,12 @@ pub fn plan(args: &[String]) -> Result<Call, Problem> {
         ["layout"] => Ok(call("GET", "/api/v1/layout".into(), None)),
         ["schema"] => Ok(call("GET", "/api/v1/schema".into(), None)),
         ["view"] => Ok(call("GET", "/api/v1/view".into(), None)),
+        ["style"] => Ok(call("GET", "/api/v1/style".into(), None)),
+        ["icons"] => Ok(call("GET", "/api/v1/icons".into(), None)),
+        ["icons", search @ ..] => {
+            let path = format!("/api/v1/icons?q={}", encode(&search.join(" ")));
+            Ok(call("GET", path, None))
+        }
         ["layout", "brightness", value] => {
             let value: u8 = value
                 .parse()
@@ -119,8 +133,9 @@ pub fn plan(args: &[String]) -> Result<Call, Problem> {
         ["page", "add", name] => Ok(call("POST", "/api/v1/pages".into(), Some(json!({ "name": name }).to_string()))),
         ["page", "remove", page] => Ok(call("DELETE", format!("/api/v1/pages/{}", encode(page)), Some("{}".into()))),
         _ => Err(usage(
-            "streamdeck layout | schema | view | layout brightness <0-100> | key set <page> <key> <json|-> | \
-             key clear <page> <key> | page add <name> | page remove <page>  [--revision <rev>] [--url <url>]",
+            "streamdeck layout | schema | view | icons [words] | style | layout brightness <0-100> | \
+             key set <page> <key> <json|-> | key clear <page> <key> | page add <name> | page remove <page>  \
+             [--revision <rev>] [--url <url>]",
         )),
     }
 }
@@ -156,9 +171,10 @@ pub fn authority(url: &str) -> Result<String, Problem> {
 }
 
 /// Carry `call` (with its body resolved) to the daemon; answer status and body.
+/// Without a token no `Authorization` is sent (enough for an open route).
 pub fn send(
     authority: &str,
-    token: &str,
+    token: Option<&str>,
     call: &Call,
     body: Option<&str>,
 ) -> Result<(u16, String), Problem> {
@@ -176,9 +192,12 @@ pub fn send(
         .map_err(unreachable)?;
 
     let mut head = format!(
-        "{} {} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n",
+        "{} {} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n",
         call.method, call.path
     );
+    if let Some(token) = token {
+        head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
     if let Some(revision) = &call.revision {
         head.push_str(&format!("If-Match: \"{revision}\"\r\n"));
     }
@@ -301,6 +320,47 @@ mod tests {
     }
 
     #[test]
+    fn plans_icons_and_style_as_open_reads() {
+        let cases = [
+            ("icons", "/api/v1/icons"),
+            ("icons mail", "/api/v1/icons?q=mail"),
+            ("icons arrow up", "/api/v1/icons?q=arrow%20up"),
+            ("style", "/api/v1/style"),
+        ];
+        for (line, path) in cases {
+            let call = plan(&words(line)).unwrap();
+            assert_eq!((call.method, call.path.as_str()), ("GET", path), "{line}");
+            assert!(call.is_open(), "{line}");
+        }
+        assert!(VERBS.contains(&"icons") && VERBS.contains(&"style"));
+        assert!(!plan(&words("layout")).unwrap().is_open());
+        assert_eq!(plan(&words("style now")).unwrap_err().name, "usage");
+    }
+
+    #[test]
+    fn sends_no_authorization_without_a_token() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let authority = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut head = [0u8; 1024];
+            let read = stream.read(&mut head).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                .unwrap();
+            String::from_utf8_lossy(&head[..read]).into_owned()
+        });
+        let call = plan(&words("style")).unwrap();
+        assert_eq!(
+            send(&authority, None, &call, None).unwrap(),
+            (200, "{}".into())
+        );
+        let head = server.join().unwrap();
+        assert!(head.starts_with("GET /api/v1/style HTTP/1.1\r\n"), "{head}");
+        assert!(!head.contains("Authorization"), "{head}");
+    }
+
+    #[test]
     fn carries_a_button_revision_and_url_and_encodes_page_names() {
         let mut args = words("key set");
         args.extend(["My page/2".into(), "4".into(), r#"{"label":"x"}"#.into()]);
@@ -386,7 +446,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         drop(listener);
-        let problem = send(&format!("127.0.0.1:{port}"), "t", &call, None).unwrap_err();
+        let problem = send(&format!("127.0.0.1:{port}"), Some("t"), &call, None).unwrap_err();
         assert_eq!(problem.name, "unreachable");
     }
 }
