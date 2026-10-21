@@ -157,7 +157,7 @@ A refusal answers `{ "error": "<name>", "detail": "<why>" }`.
 | `no-token`       | 401    | No `Authorization: Bearer` header                                 |
 | `bad-token`      | 401    | A token no caller holds                                           |
 | `bad-json`       | 400    | A body that does not parse as the route's object                  |
-| `invalid`        | 422    | The layout the change would make breaks a rule (an image with an icon, an unknown icon, ...); `detail` says which |
+| `invalid`        | 422    | The layout the change would make breaks a rule (an image with an icon, an unknown icon, a label line over the style's 10 characters on `key set`, ...); `detail` says which |
 | `no-such-page`   | 404    | `{page}` names no page                                            |
 | `last-page`      | 409    | Removing the only page                                            |
 | `stale-revision` | 409    | `If-Match` names a revision the file no longer has                |

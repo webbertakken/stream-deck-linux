@@ -56,6 +56,19 @@ pub const FOREGROUND: [u8; 3] = crate::render::DEFAULT_TEXT_COLOR;
 /// WCAG 2.2 AA for normal text.
 pub const MINIMUM_CONTRAST: f64 = 4.5;
 
+/// The most characters a line of a label may hold; a program's key with a longer line is refused.
+pub const LABEL_LINE_MAX: usize = 10;
+
+/// Why a label breaks the style, or `None` when every line fits.
+pub fn label_fault(label: &str) -> Option<String> {
+    let longest = label.split('\n').map(|line| line.chars().count()).max()?;
+    (longest > LABEL_LINE_MAX).then(|| {
+        format!(
+            "label '{label}' has a line of {longest} characters; the deck's style allows at most {LABEL_LINE_MAX} (streamdeck style)"
+        )
+    })
+}
+
 /// How a label reads.
 pub const LABEL_RULES: &[&str] = &[
     "One or two words, in title case.",
@@ -120,6 +133,27 @@ pub fn foreground_contrast(swatch: &Swatch) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allows_a_label_line_up_to_its_limit_and_names_one_past_it() {
+        assert_eq!(label_fault("Mail"), None);
+        assert_eq!(label_fault("Screens"), None);
+        assert_eq!(label_fault("Abcdefghij"), None);
+        assert_eq!(label_fault("Two\nLines"), None);
+        assert_eq!(label_fault("Kühlschrank"), Some(
+            "label 'Kühlschrank' has a line of 11 characters; the deck's style allows at most 10 (streamdeck style)".to_string()
+        ));
+        assert!(label_fault("Ok\nThunderbird")
+            .unwrap()
+            .contains("a line of 11 characters"));
+    }
+
+    #[test]
+    fn says_its_label_limit_in_its_rules() {
+        assert!(LABEL_RULES
+            .iter()
+            .any(|rule| rule.contains(&format!("At most {LABEL_LINE_MAX} characters a line"))));
+    }
 
     const DOC: &str = include_str!("../docs/style.md");
 

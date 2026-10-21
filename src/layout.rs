@@ -73,6 +73,16 @@ pub fn apply(config: &Config, edit: Edit, model: &Model) -> Result<Applied, Edit
 
     match edit {
         Edit::SetKey { page, key, button } => {
+            let labels = button.label.iter().chain(
+                button
+                    .states
+                    .iter()
+                    .flatten()
+                    .filter_map(|s| s.label.as_ref()),
+            );
+            if let Some(fault) = labels.filter_map(|l| crate::style::label_fault(l)).next() {
+                return Err(EditError::Invalid(fault));
+            }
             let index = find_page(&pages, &page)?;
             let buttons = &mut pages[index].buttons;
             buttons.retain(|b| b.key != key);
@@ -302,6 +312,38 @@ mod tests {
     fn stores_brightness() {
         let applied = apply(&single(vec![]), Edit::Brightness(80), &Model::MK2).unwrap();
         assert_eq!(applied.config.brightness, Some(80));
+    }
+
+    #[test]
+    fn refuses_a_key_whose_label_breaks_the_style_naming_the_rule() {
+        let config = single(vec![]);
+        let long = ButtonConfig {
+            label: Some("Thunderbird".into()),
+            ..labelled(0, "x")
+        };
+        let err = apply(&config, set("0", 4, long), &Model::MK2).unwrap_err();
+        assert_eq!(err.name(), "invalid");
+        assert!(
+            err.detail().contains("a line of 11 characters"),
+            "{}",
+            err.detail()
+        );
+        let state = ButtonConfig {
+            states: Some(vec![crate::config::ButtonState {
+                label: Some("Thunderbird".into()),
+                color: Some("#000000".into()),
+                ..Default::default()
+            }]),
+            label: None,
+            ..labelled(0, "x")
+        };
+        assert_eq!(
+            apply(&config, set("0", 4, state), &Model::MK2)
+                .unwrap_err()
+                .name(),
+            "invalid"
+        );
+        assert!(apply(&config, set("0", 4, labelled(0, "Mail")), &Model::MK2).is_ok());
     }
 
     #[test]
