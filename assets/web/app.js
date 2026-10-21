@@ -11,6 +11,11 @@ const state = {
   selected: 0,
   appActive: -1,
   appMatches: [],
+  palette: [], // [{ name, hex, for }] from /api/v1/style
+  iconActive: -1,
+  iconMatches: [], // [{ name, tags }] from /api/v1/icons
+  iconTotal: 0, // how many icons the latest search matched
+  iconSearch: 0, // the latest search, so a slow answer never overwrites a newer one
 };
 
 function statusMsg(text, kind) {
@@ -24,6 +29,7 @@ function isEmpty(b) {
   return (
     !b ||
     (!b.image &&
+      !b.icon &&
       !b.color &&
       !b.label &&
       !b.run &&
@@ -39,7 +45,7 @@ function isEmpty(b) {
 function hasVisual(b) {
   return !!(
     b &&
-    (b.image || b.color || b.label || b.watch || (b.states && b.states.length))
+    (b.image || b.icon || b.color || b.label || b.watch || (b.states && b.states.length))
   );
 }
 
@@ -53,6 +59,8 @@ function renderStates(states) {
 function addStateRow(s) {
   const row = document.createElement("div");
   row.className = "state-row";
+  // Fields this row has no input for (icon, image, builtin, text_color) are kept.
+  row.base = { ...(s || {}) };
   const label = document.createElement("input");
   label.type = "text";
   label.className = "state-label";
@@ -82,11 +90,16 @@ function addStateRow(s) {
 
 function collectStates() {
   return [...document.querySelectorAll("#statesList .state-row")].map((row) => {
-    const state = { color: row.querySelector(".state-color").value };
+    const state = { ...row.base, color: row.querySelector(".state-color").value };
+    delete state.label;
+    delete state.run;
     const label = row.querySelector(".state-label").value.trim();
     if (label) state.label = label;
     const run = row.querySelector(".state-run").value.trim();
-    if (run) state.run = run;
+    if (run) {
+      state.run = run;
+      delete state.builtin;
+    }
     return state;
   });
 }
@@ -206,6 +219,9 @@ function populateForm(b) {
   $("useColor").checked = !!b.color;
   $("color").value = b.color || "#1e1e2e";
   $("image").value = b.image || "";
+  $("icon").value = b.icon || "";
+  $("iconQuery").value = b.icon || "";
+  closeIconResults();
   $("watch").value = b.watch || "";
   $("interval").value = b.interval || 5;
 
@@ -256,6 +272,7 @@ function populateForm(b) {
   $("pageTarget").value = builtin === "page" ? openTarget : "";
 
   syncActionVisibility();
+  syncLook();
 }
 
 function currentAction() {
@@ -286,6 +303,8 @@ function readForm() {
   if ($("useColor").checked) b.color = $("color").value;
   const image = $("image").value.trim();
   if (image) b.image = image;
+  const icon = $("icon").value;
+  if (icon) b.icon = icon;
   const watch = $("watch").value.trim();
   if (watch) {
     b.watch = watch;
@@ -334,7 +353,180 @@ function onFormChange() {
   if (isEmpty(b)) currentButtons().delete(state.selected);
   else currentButtons().set(state.selected, b);
   syncActionVisibility();
+  syncLook();
   scheduleApply();
+}
+
+// ---- Icon picker (Lucide, searched on the daemon) and palette swatches ----
+const ICON_SEARCH_DELAY_MS = 120;
+
+function glyphUrl(name) {
+  return `url("/api/lucide/${encodeURIComponent(name)}.svg")`;
+}
+
+function syncLook() {
+  const icon = $("icon").value;
+  const preview = $("iconPreview");
+  preview.style.backgroundColor = $("useColor").checked ? $("color").value : "#000000";
+  preview.style.color = $("useText").checked ? $("textColor").value : "#ffffff";
+  preview.querySelector(".iconpick__glyph").style.setProperty("--glyph", icon ? glyphUrl(icon) : "none");
+  preview.dataset.empty = icon ? "false" : "true";
+  $("iconClear").disabled = !icon;
+  const color = $("useColor").checked ? $("color").value.toLowerCase() : "";
+  document.querySelectorAll("#swatches .swatch").forEach((swatch) => {
+    swatch.setAttribute("aria-pressed", swatch.dataset.hex === color ? "true" : "false");
+  });
+}
+
+function buildSwatches() {
+  const group = $("swatches");
+  group.innerHTML = "";
+  state.palette.forEach((swatch) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "swatch";
+    button.dataset.hex = swatch.hex.toLowerCase();
+    button.style.backgroundColor = swatch.hex;
+    button.textContent = swatch.name;
+    button.title = `${swatch.name} ${swatch.hex}: ${swatch.for}`;
+    button.setAttribute("aria-label", `${swatch.name}, for ${swatch.for}`);
+    button.addEventListener("click", () => {
+      $("useColor").checked = true;
+      $("color").value = swatch.hex.toLowerCase();
+      onFormChange();
+    });
+    group.appendChild(button);
+  });
+  group.hidden = state.palette.length === 0;
+}
+
+async function searchIcons(query) {
+  const search = ++state.iconSearch;
+  try {
+    const res = await fetch(`/api/v1/icons?q=${encodeURIComponent(query)}`);
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const found = await res.json();
+    if (search !== state.iconSearch) return;
+    state.iconMatches = found.icons;
+    state.iconTotal = found.total;
+    state.iconActive = found.icons.length ? 0 : -1;
+    renderIconResults();
+    openIconResults();
+  } catch (err) {
+    if (search === state.iconSearch) statusMsg(`Icon search failed: ${err}`, "err");
+  }
+}
+
+function renderIconResults() {
+  const total = state.iconTotal;
+  const ul = $("iconResults");
+  ul.innerHTML = "";
+  if (state.iconMatches.length === 0) {
+    const li = document.createElement("li");
+    li.className = "combo__empty";
+    li.textContent = "No matching icons";
+    ul.appendChild(li);
+    return;
+  }
+  state.iconMatches.forEach((icon, i) => {
+    const li = document.createElement("li");
+    li.className = "combo__option";
+    li.id = `icon-option-${i}`;
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", i === state.iconActive ? "true" : "false");
+    li.title = icon.tags.join(", ");
+    const glyph = document.createElement("span");
+    glyph.className = "combo__glyph";
+    glyph.style.setProperty("--glyph", glyphUrl(icon.name));
+    const name = document.createElement("span");
+    name.className = "combo__name";
+    name.textContent = icon.name;
+    li.append(glyph, name);
+    li.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      chooseIcon(icon.name);
+    });
+    ul.appendChild(li);
+  });
+  if (total > state.iconMatches.length) {
+    const li = document.createElement("li");
+    li.className = "combo__empty";
+    li.textContent = `${total - state.iconMatches.length} more: add words to narrow`;
+    ul.appendChild(li);
+  }
+  const active = state.iconActive >= 0 ? `icon-option-${state.iconActive}` : "";
+  $("iconQuery").setAttribute("aria-activedescendant", active);
+}
+
+function openIconResults() {
+  $("iconResults").hidden = false;
+  $("iconQuery").setAttribute("aria-expanded", "true");
+}
+
+function closeIconResults() {
+  $("iconResults").hidden = true;
+  state.iconActive = -1;
+  $("iconQuery").setAttribute("aria-expanded", "false");
+  $("iconQuery").removeAttribute("aria-activedescendant");
+}
+
+function chooseIcon(name) {
+  $("icon").value = name;
+  $("iconQuery").value = name;
+  closeIconResults();
+  if ($("image").value.trim()) {
+    $("image").value = "";
+    statusMsg("The icon replaces the image: a key shows one picture.", "ok");
+  }
+  onFormChange();
+}
+
+function clearIcon() {
+  $("icon").value = "";
+  $("iconQuery").value = "";
+  closeIconResults();
+  onFormChange();
+}
+
+let iconTimer = null;
+function onIconInput(e) {
+  e.stopPropagation();
+  clearTimeout(iconTimer);
+  const query = $("iconQuery").value;
+  iconTimer = setTimeout(() => searchIcons(query), ICON_SEARCH_DELAY_MS);
+}
+
+function onIconBlur() {
+  setTimeout(() => {
+    closeIconResults();
+    // Typing only searches; the chosen icon changes on a pick or on emptying the field.
+    if (!$("iconQuery").value.trim() && $("icon").value) clearIcon();
+    else $("iconQuery").value = $("icon").value;
+  }, 120);
+}
+
+function onIconKeydown(e) {
+  if ($("iconResults").hidden && e.key !== "ArrowDown") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if ($("iconResults").hidden) {
+      searchIcons($("iconQuery").value);
+      return;
+    }
+    const n = state.iconMatches.length;
+    if (!n) return;
+    const dir = e.key === "ArrowDown" ? 1 : -1;
+    state.iconActive = (state.iconActive + dir + n) % n;
+    renderIconResults();
+    document.getElementById(`icon-option-${state.iconActive}`)?.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter") {
+    if (state.iconActive >= 0 && state.iconMatches[state.iconActive]) {
+      e.preventDefault();
+      chooseIcon(state.iconMatches[state.iconActive].name);
+    }
+  } else if (e.key === "Escape") {
+    closeIconResults();
+  }
 }
 
 // ---- Fuzzy application search (combobox) ----
@@ -422,7 +614,7 @@ function chooseApp(app) {
   $("appQuery").value = app.name;
   closeAppResults();
   if (!$("label").value.trim()) $("label").value = app.name;
-  if (!$("image").value.trim() && app.icon) $("image").value = app.icon;
+  if (!$("image").value.trim() && !$("icon").value && app.icon) $("image").value = app.icon;
   onFormChange();
 }
 
@@ -520,9 +712,20 @@ function clearKey() {
 }
 
 async function load() {
-  const [stateRes, appsRes] = await Promise.all([fetch("/api/state"), fetch("/api/apps")]);
+  const [stateRes, appsRes, style] = await Promise.all([
+    fetch("/api/state"),
+    fetch("/api/apps"),
+    fetch("/api/v1/style")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .catch((err) => {
+        console.error(`palette unavailable: ${err}`);
+        return { palette: [] };
+      }),
+  ]);
   const data = await stateRes.json();
   state.apps = await appsRes.json().catch(() => []);
+  state.palette = style.palette;
+  buildSwatches();
   state.model = data.model;
   state.brightness = data.brightness ?? 60;
   state.pressFeedback = data.press_feedback !== false;
@@ -552,6 +755,11 @@ function wire() {
   $("appQuery").addEventListener("keydown", onAppKeydown);
   $("appQuery").addEventListener("focus", onAppInput);
   $("appQuery").addEventListener("blur", () => setTimeout(closeAppResults, 120));
+  $("iconQuery").addEventListener("input", onIconInput);
+  $("iconQuery").addEventListener("keydown", onIconKeydown);
+  $("iconQuery").addEventListener("focus", () => searchIcons($("iconQuery").value));
+  $("iconQuery").addEventListener("blur", onIconBlur);
+  $("iconClear").addEventListener("click", clearIcon);
   $("clearKey").addEventListener("click", clearKey);
   $("addState").addEventListener("click", () => {
     addStateRow({ color: "#40a02b" });
