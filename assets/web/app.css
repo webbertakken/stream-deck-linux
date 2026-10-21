@@ -376,3 +376,81 @@ textarea#macro {
   cursor: pointer;
   padding: 4px 8px;
 }
+
+/* Icon picker: a tinted preview, a search combobox and a remove button */
+.iconpick {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.iconpick__combo {
+  flex: 1;
+  min-width: 0;
+}
+.iconpick__preview {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.iconpick__glyph,
+.combo__glyph {
+  display: block;
+  background-color: currentColor;
+  -webkit-mask: var(--glyph) center / contain no-repeat;
+  mask: var(--glyph) center / contain no-repeat;
+}
+.iconpick__glyph {
+  width: 24px;
+  height: 24px;
+}
+.iconpick__preview[data-empty="true"] .iconpick__glyph {
+  visibility: hidden;
+}
+.combo__glyph {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+.btn--square {
+  padding: 8px 11px;
+}
+.btn:disabled {
+  color: var(--muted);
+  cursor: default;
+  border-color: var(--line);
+}
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Palette swatches for the background colour (from /api/v1/style) */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: -6px;
+}
+.swatch {
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.swatch:hover {
+  border-color: var(--text);
+}
+.swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--text);
+}
+.swatch[aria-pressed="true"]::before {
+  content: "\2713\00a0";
+}

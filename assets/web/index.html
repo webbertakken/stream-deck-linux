@@ -44,6 +44,33 @@
             <input id="label" type="text" maxlength="24" placeholder="(none)" />
           </div>
 
+          <div class="field">
+            <label for="iconQuery">Icon</label>
+            <div class="iconpick">
+              <span id="iconPreview" class="iconpick__preview" aria-hidden="true">
+                <span class="iconpick__glyph"></span>
+              </span>
+              <div class="combo iconpick__combo">
+                <input
+                  id="iconQuery"
+                  type="text"
+                  class="combo__input"
+                  placeholder="Search icons…"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-controls="iconResults"
+                  aria-autocomplete="list"
+                  aria-describedby="iconHint"
+                  autocomplete="off"
+                />
+                <input id="icon" type="hidden" />
+                <ul id="iconResults" class="combo__results" role="listbox" aria-label="Icons" hidden></ul>
+              </div>
+              <button id="iconClear" type="button" class="btn btn--square" aria-label="Remove icon" title="Remove icon">✕</button>
+            </div>
+            <p id="iconHint" class="hint">A Lucide icon, drawn in the text colour. It replaces an image.</p>
+          </div>
+
           <div class="field field--row">
             <label class="check">
               <input id="useText" type="checkbox" /> Text colour
@@ -57,6 +84,7 @@
             </label>
             <input id="color" type="color" value="#1e1e2e" aria-label="Background colour" />
           </div>
+          <div id="swatches" class="swatches" role="group" aria-label="Palette" hidden></div>
 
           <div class="field">
             <label for="image">Image path</label>
