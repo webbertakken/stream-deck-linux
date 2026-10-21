@@ -25,7 +25,28 @@ tiny_http = "0.12"
 ab_glyph = "0.2"
 ksni = { version = "0.3", features = ["blocking"] }
 base64 = "0.23"
+resvg = { version = "=0.48.1", default-features = false }
+
+[build-dependencies]
+serde_json = "1"
 
 [profile.release]
 opt-level = 3
 lto = true
+
+# The SVG stack draws key icons; optimised in dev and test builds too, so the
+# test that draws every vendored icon stays fast.
+[profile.dev.package.resvg]
+opt-level = 3
+[profile.dev.package.usvg]
+opt-level = 3
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.roxmltree]
+opt-level = 3
+[profile.dev.package.svgtypes]
+opt-level = 3
+[profile.dev.package.kurbo]
+opt-level = 3

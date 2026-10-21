@@ -14,6 +14,7 @@ pub mod error;
 pub mod events;
 pub mod guard;
 pub mod hid;
+pub mod icons;
 pub mod image;
 pub mod install;
 pub mod keyboard;
