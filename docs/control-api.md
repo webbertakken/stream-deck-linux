@@ -1,7 +1,7 @@
 # Control API and CLI client
 
 The running daemon (`streamdeck tray` or `streamdeck ui`) owns the device and the config file. Programs
-change the layout through its **control API**, never by writing the file: the daemon validates each
+read what the deck shows and change the layout through its **control API**, never by writing the file: the daemon validates each
 change against the model, writes the file atomically, and reloads the device at once. The `streamdeck`
 CLI's layout verbs are a client of that API, so the same binary edits the deck from a terminal, a script
 or another program.
@@ -32,7 +32,7 @@ Every `/api/v1` request carries `Authorization: Bearer <token>`.
 | `streamdeck token revoke <caller>`              | Deletes it; that caller is refused from the next request. |
 | `streamdeck token list`                         | Names the callers that hold a token.                      |
 
-Each authorised request is logged with its caller's name; each refusal with its name.
+Each authorised request is logged with its caller's name and how long it took; each refusal with its name.
 
 ## Revisions
 
@@ -49,6 +49,7 @@ has changed since (the web editor, a hand edit, another caller), the write is re
 | ------------------------------------ | ---------------------------- | ---------------------------------------------------------- |
 | `GET /api/v1/layout`                 |                              | `{ revision, model, brightness, press_feedback, pages }`   |
 | `GET /api/v1/schema`                 |                              | `{ api, fields, rules, builtins, hold_keys }`              |
+| `GET /api/v1/view`                   |                              | `{ page, pages, model, brightness, standby, keys }`: what the device shows now |
 | `PUT /api/v1/pages/{page}/keys/{key}` | a button, without `key`      | `{ revision }`: the key is replaced whole                  |
 | `DELETE /api/v1/pages/{page}/keys/{key}` |                          | `{ revision }`: the key is blank; already blank is fine    |
 | `POST /api/v1/pages`                 | `{ "name": "…" }`            | `{ revision, page }`: appended, `page` its index           |
@@ -63,8 +64,39 @@ has changed since (the web editor, a hand edit, another caller), the write is re
   `rules` what every key must meet, `builtins` every built-in action (patterns such as `page:<name|index>` included), `hold_keys` every key
   name a `hold` accepts. A caller that reads it needs no change when the deck gains a field. Tests
   fail when a button field or a built-in is added without being described there (`src/schema.rs`).
+- `view` is described under *The live view* below.
 - A write re-serialises the whole config, so comments in a hand-written file do not survive it (the
   web editor's saves behave the same).
+
+## The live view
+
+`GET /api/v1/view` answers what the device shows at this moment, as the daemon last drew it: the
+current page, toggle states, live (`watch`) labels and press or hold highlights included.
+
+```json
+{
+  "page": { "index": 0, "name": null },
+  "pages": 1,
+  "model": { "name": "Stream Deck MK.2", "columns": 5, "rows": 3, "keyCount": 15 },
+  "brightness": 40,
+  "standby": false,
+  "keys": [{ "key": 0, "png": "<base64 PNG>", "held": false }]
+}
+```
+
+- `page` is the page on show, `name` `null` when it has none; `pages` counts the layout's pages.
+- `brightness` is the percentage the daemon last set; `null` while it has set none (a layout without
+  `brightness` leaves the device at its own).
+- `keys` holds every key of the model, in index order. `png` is the key image exactly as sent to the
+  device, upright (before the device's rotation), at the model's key size (72x72 on the MK.2).
+  A blank key is a black image.
+- `held` is `true` while the key's `hold` latch is on (its keyboard keys are held down).
+- After a reset the device shows its standby logo: every key reads as black and `standby` is `true`
+  until the daemon next redraws the whole page (a reload or a page switch). A key drawn in between
+  shows its image while the rest stay on the logo.
+- Before the daemon has drawn the deck once, the route answers `503 not-ready`.
+- The view is read, never stored: polling it changes nothing. An answer takes well under a
+  millisecond to encode on a release build (`cargo run --release --example view_timing`).
 
 ## Refusals
 
@@ -84,6 +116,7 @@ A refusal answers `{ "error": "<name>", "detail": "<why>" }`.
 | `stale-revision` | 409    | `If-Match` names a revision the file no longer has                |
 | `unreadable`     | 500    | The config on disk does not parse; fix it by hand or in the editor |
 | `write-failed`   | 500    | The config could not be written; the old file is untouched        |
+| `not-ready`      | 503    | The daemon has not drawn the deck yet; ask again shortly          |
 | `not-found`      | 404    | No such route                                                     |
 
 ## The CLI client
@@ -91,6 +124,7 @@ A refusal answers `{ "error": "<name>", "detail": "<why>" }`.
 ```bash
 streamdeck layout                            # the layout, as JSON
 streamdeck schema                            # what a button may hold, as JSON
+streamdeck view                              # what the deck shows now, as JSON
 streamdeck key set <page> <key> '<json>'     # replace a key ("-" reads the JSON from stdin)
 streamdeck key clear <page> <key>            # blank a key
 streamdeck page add <name>                   # append a page

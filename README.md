@@ -119,21 +119,22 @@ The generated icons live in `assets/icons/`
 
 ## Control API and CLI client
 
-Programs (scripts, assistants) change the layout through the running daemon, never by writing the
-file: each change is validated, written atomically and shown on the device at once. Every caller holds
-its own token.
+Programs (scripts, assistants) read what the deck shows and change the layout through the running
+daemon, never by writing the file: each change is validated, written atomically and shown on the
+device at once. Every caller holds its own token.
 
 ```bash
 streamdeck token issue cli                   # once: a token for your own CLI
 streamdeck layout                            # the layout, as JSON, with its revision
 streamdeck schema                            # every key field, built-in and hold key this build knows
+streamdeck view                              # what the deck shows now: page, brightness, each key as a PNG
 streamdeck key set 0 4 '{"label":"Mail","color":"#223344","run":"thunderbird"}'
 streamdeck key clear 0 4
 streamdeck page add Media
 streamdeck layout brightness 60
 ```
 
-The routes, tokens, revisions and named refusals are in [`docs/control-api.md`](docs/control-api.md).
+The routes, the live view, tokens, revisions and named refusals are in [`docs/control-api.md`](docs/control-api.md).
 
 ## Config reference
 
@@ -256,6 +257,7 @@ all of this: page tabs, fuzzy app search, toggle states, live and macro keys.
 - `image` / `render` - fit, orient and encode key images; compose backgrounds
   with centred text.
 - `device` - the high-level `StreamDeck` API.
+- `view` - the frame of what the device shows, shared by the daemon with the control API.
 - `config` / `actions` / `runtime` - the TOML layout, action model, and the
   control-aware render + press-to-action daemon loop.
 - `keyboard` - a pure-Rust virtual uinput keyboard for hold-key latches (raw
