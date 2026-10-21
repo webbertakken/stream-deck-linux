@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use streamdeck::runtime::Control;
 use streamdeck::tokens::TokenStore;
+use streamdeck::view::LiveView;
 use streamdeck::webui::WebUi;
 use streamdeck::Model;
 
@@ -18,6 +19,8 @@ pub struct Editor {
     pub port: u16,
     pub config: PathBuf,
     pub tokens: TokenStore,
+    /// What the editor's control API answers as the device's view.
+    pub view: LiveView,
     _control: Receiver<Control>,
 }
 
@@ -29,7 +32,8 @@ pub fn start_editor(name: &str, config_text: &str) -> Editor {
     std::fs::write(&config, config_text).unwrap();
     let tokens = TokenStore::new(dir.join("tokens"));
     let (tx, control) = mpsc::channel();
-    let web = WebUi::bind("127.0.0.1:0", Model::MK2, config.clone(), tx)
+    let view = LiveView::new();
+    let web = WebUi::bind("127.0.0.1:0", Model::MK2, config.clone(), tx, view.clone())
         .unwrap()
         .with_tokens(tokens.clone());
     let port: u16 = web.url().rsplit(':').next().unwrap().parse().unwrap();
@@ -40,6 +44,7 @@ pub fn start_editor(name: &str, config_text: &str) -> Editor {
         port,
         config,
         tokens,
+        view,
         _control: control,
     }
 }

@@ -16,6 +16,7 @@ use crate::model::Model;
 use crate::runtime::Control;
 use crate::schema;
 use crate::tokens::TokenStore;
+use crate::view::LiveView;
 
 /// The prefix every control route shares.
 pub const PREFIX: &str = "/api/v1/";
@@ -103,6 +104,8 @@ pub struct ControlApi {
     pub model: Model,
     pub tokens: TokenStore,
     pub control: Sender<Control>,
+    /// What the device shows, as the daemon last drew it.
+    pub view: LiveView,
 }
 
 impl ControlApi {
@@ -314,6 +317,7 @@ mod tests {
                 model: Model::MK2,
                 tokens,
                 control: tx,
+                view: LiveView::new(),
             },
             token,
             control,

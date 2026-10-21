@@ -91,6 +91,11 @@ impl KeySurface {
         &self.canvas
     }
 
+    /// The upright composed canvas, taken whole.
+    pub fn into_canvas(self) -> RgbImage {
+        self.canvas
+    }
+
     /// Orient for the model and encode to the wire format.
     pub fn encode(&self) -> Result<Vec<u8>> {
         let oriented = key_image::orient(&self.spec, self.canvas.clone());

@@ -12,6 +12,7 @@ use streamdeck::remote::{self, Problem};
 use streamdeck::runtime::Control;
 use streamdeck::tokens::{self, TokenStore};
 use streamdeck::tray::StreamDeckTray;
+use streamdeck::view::LiveView;
 use streamdeck::webui::WebUi;
 use streamdeck::{autostart, install, runtime, Error, Model, StreamDeck};
 
@@ -178,49 +179,64 @@ fn cmd_run(args: &[String]) -> Result<(), Error> {
     install_signal_handlers();
 
     let (_tx, rx) = mpsc::channel();
-    let result = runtime::run_with_control(deck, config_path, &SHUTDOWN, &rx);
+    let result = runtime::run_with_control(deck, config_path, &SHUTDOWN, &rx, LiveView::new());
     println!("\nStopped.");
     result
 }
 
+/// The press-to-action daemon running in its own thread.
+struct Daemon {
+    model: Model,
+    control: Sender<Control>,
+    view: LiveView,
+    handle: JoinHandle<()>,
+}
+
 /// Open the device and run the press-to-action daemon in a background thread.
-fn start_daemon(config_path: PathBuf) -> Result<(Model, Sender<Control>, JoinHandle<()>), Error> {
+fn start_daemon(config_path: PathBuf) -> Result<Daemon, Error> {
     let deck = StreamDeck::open_first()?;
     let model = *deck.model();
-    let (tx, rx) = mpsc::channel::<Control>();
-    let daemon_path = config_path;
+    let (control, rx) = mpsc::channel::<Control>();
+    let view = LiveView::new();
+    let daemon_view = view.clone();
     let handle = std::thread::spawn(move || {
-        if let Err(err) = runtime::run_with_control(deck, daemon_path, &SHUTDOWN, &rx) {
+        if let Err(err) = runtime::run_with_control(deck, config_path, &SHUTDOWN, &rx, daemon_view)
+        {
             eprintln!("error: daemon stopped: {err}");
         }
         SHUTDOWN.store(true, Ordering::Relaxed);
     });
-    Ok((model, tx, handle))
+    Ok(Daemon {
+        model,
+        control,
+        view,
+        handle,
+    })
 }
 
 /// Preferred local port for the editor, so the URL is stable across restarts.
 const PREFERRED_WEB_ADDR: &str = "127.0.0.1:57617";
 
 /// Bind the editor to the preferred port, falling back to an ephemeral one.
-fn bind_web(model: Model, config_path: PathBuf, control: Sender<Control>) -> Result<WebUi, Error> {
-    match WebUi::bind(
-        PREFERRED_WEB_ADDR,
-        model,
-        config_path.clone(),
-        control.clone(),
-    ) {
+fn bind_web(daemon: &Daemon, config_path: PathBuf) -> Result<WebUi, Error> {
+    let bind = |addr: &str, config_path: PathBuf| {
+        WebUi::bind(
+            addr,
+            daemon.model,
+            config_path,
+            daemon.control.clone(),
+            daemon.view.clone(),
+        )
+    };
+    match bind(PREFERRED_WEB_ADDR, config_path.clone()) {
         Ok(web) => Ok(web),
-        Err(_) => WebUi::bind("127.0.0.1:0", model, config_path, control),
+        Err(_) => bind("127.0.0.1:0", config_path),
     }
 }
 
 /// Start the in-process web editor server.
-fn start_web_ui(
-    model: Model,
-    config_path: PathBuf,
-    control: Sender<Control>,
-) -> Result<(String, JoinHandle<()>), Error> {
-    let web = bind_web(model, config_path, control)?;
+fn start_web_ui(daemon: &Daemon, config_path: PathBuf) -> Result<(String, JoinHandle<()>), Error> {
+    let web = bind_web(daemon, config_path)?;
     let url = web.url();
     let handle = std::thread::spawn(move || {
         if let Err(err) = web.serve(&SHUTDOWN) {
@@ -235,18 +251,24 @@ fn cmd_tray(args: &[String]) -> Result<(), Error> {
     ensure_config_exists(&config_path)?;
     install_signal_handlers();
 
-    let (model, tx, daemon) = start_daemon(config_path.clone())?;
-    let (url, web) = start_web_ui(model, config_path, tx.clone())?;
+    let daemon = start_daemon(config_path.clone())?;
+    let (url, web) = start_web_ui(&daemon, config_path)?;
+    let model = daemon.model;
     println!("Tray starting for {}. Editor at {url}", model.name);
 
-    let tray = StreamDeckTray::new(tx, &SHUTDOWN, url, format!("{} connected", model.name));
+    let tray = StreamDeckTray::new(
+        daemon.control.clone(),
+        &SHUTDOWN,
+        url,
+        format!("{} connected", model.name),
+    );
     let _handle = tray.show()?;
     println!("Tray running. Use the tray menu (or Ctrl-C) to quit.");
 
     while !SHUTDOWN.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(200));
     }
-    let _ = daemon.join();
+    let _ = daemon.handle.join();
     let _ = web.join();
     println!("\nStopped.");
     Ok(())
@@ -257,15 +279,15 @@ fn cmd_ui(args: &[String]) -> Result<(), Error> {
     ensure_config_exists(&config_path)?;
     install_signal_handlers();
 
-    let (model, tx, daemon) = start_daemon(config_path.clone())?;
-    let web = bind_web(model, config_path, tx)?;
+    let daemon = start_daemon(config_path.clone())?;
+    let web = bind_web(&daemon, config_path)?;
     let url = web.url();
-    println!("Editor for {} at {url}", model.name);
+    println!("Editor for {} at {url}", daemon.model.name);
     open_in_browser(&url);
 
     let result = web.serve(&SHUTDOWN);
     SHUTDOWN.store(true, Ordering::Relaxed);
-    let _ = daemon.join();
+    let _ = daemon.handle.join();
     println!("\nStopped.");
     result
 }

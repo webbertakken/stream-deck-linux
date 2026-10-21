@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 
 use crate::actions::{Builtin, KeyAction, BRIGHTNESS_STEP};
 use crate::config::{ButtonConfig, Config, Page};
-use crate::device::StreamDeck;
+use crate::device::Deck;
 use crate::error::Result;
 use crate::events::{diff_states, KeyEventKind};
 use crate::keyboard::{KeyCode, KeyEmitter, UinputKeyboard};
-use crate::render;
+use crate::render::{self, KeySurface};
+use crate::view::{Frame, LiveView, PageRef};
 
 /// Brightness assumed when the config does not specify one (for up/down steps).
 const DEFAULT_BRIGHTNESS: u8 = 50;
@@ -30,6 +31,8 @@ struct LiveKey {
     command: String,
     interval: Duration,
     next_due: Instant,
+    /// The label its command last answered; `None` until it first runs.
+    label: Option<String>,
 }
 
 /// First non-empty line of command output, trimmed and length-capped, used as
@@ -54,6 +57,7 @@ fn collect_live(buttons: &[ButtonConfig]) -> Vec<LiveKey> {
                 command: cmd.clone(),
                 interval: Duration::from_secs(b.interval.unwrap_or(DEFAULT_WATCH_INTERVAL).max(1)),
                 next_due: Instant::now(),
+                label: None,
             })
         })
         .collect()
@@ -180,7 +184,9 @@ pub enum Control {
 
 /// Live daemon state: the device plus the rendered pages and current actions.
 struct Session {
-    deck: StreamDeck,
+    deck: Box<dyn Deck>,
+    /// What the device shows, shared with the control API.
+    view: LiveView,
     config_path: PathBuf,
     base_dir: PathBuf,
     pages: Vec<Page>,
@@ -208,7 +214,7 @@ fn default_emitter() -> Result<Box<dyn KeyEmitter>> {
 
 impl Session {
     /// Load the config, set brightness and render the first page.
-    fn load(deck: StreamDeck, config_path: PathBuf) -> Result<Self> {
+    fn load(deck: Box<dyn Deck>, config_path: PathBuf, view: LiveView) -> Result<Self> {
         let base_dir = config_path
             .parent()
             .map(Path::to_path_buf)
@@ -216,12 +222,10 @@ impl Session {
         let config = Config::load(&config_path)?;
         config.validate(deck.model())?;
         let brightness = config.brightness.unwrap_or(DEFAULT_BRIGHTNESS);
-        if let Some(b) = config.brightness {
-            deck.set_brightness(b)?;
-        }
         let previous = vec![false; deck.model().key_count as usize];
         let mut session = Self {
             deck,
+            view,
             config_path,
             base_dir,
             pages: config.pages(),
@@ -237,6 +241,14 @@ impl Session {
             make_emitter: default_emitter,
             held: HashMap::new(),
         };
+        session.view.publish(Frame::new(
+            session.deck.model(),
+            session.page_ref(0),
+            session.pages.len(),
+        ));
+        if let Some(b) = config.brightness {
+            session.apply_brightness(b)?;
+        }
         session.show_page(0)?;
         Ok(session)
     }
@@ -251,44 +263,71 @@ impl Session {
         self.actions = action_map(&buttons)?;
         self.live = collect_live(&buttons);
         self.toggle_index.clear();
+        let (page, pages) = (self.page_ref(self.current_page), self.pages.len());
+        self.view.update(|frame| frame.show_page(page, pages));
         self.render_current()?;
+        Ok(())
+    }
+
+    /// The page at `index`, as the view names it.
+    fn page_ref(&self, index: usize) -> PageRef {
+        PageRef {
+            index,
+            name: self.pages.get(index).and_then(|page| page.name.clone()),
+        }
+    }
+
+    /// Send a key's image to the device, then record it as shown.
+    fn show(&mut self, key: u8, surface: KeySurface) -> Result<()> {
+        self.deck.set_key_image(key, &surface.encode()?)?;
+        let held = self.held.contains_key(&key);
+        let image = surface.into_canvas();
+        self.view.update(|frame| frame.show_key(key, image, held));
+        Ok(())
+    }
+
+    /// Blank every key on the device, then record it.
+    fn blank_all(&mut self) -> Result<()> {
+        self.deck.clear_all()?;
+        self.view.update(Frame::blank_all);
+        Ok(())
+    }
+
+    /// Set the device's brightness, then record it.
+    fn apply_brightness(&mut self, percent: u8) -> Result<()> {
+        self.deck.set_brightness(percent)?;
+        self.brightness = percent;
+        self.view.update(|frame| frame.set_brightness(percent));
         Ok(())
     }
 
     /// Render the current page, honouring each toggle key's current state.
     fn render_current(&mut self) -> Result<()> {
-        self.deck.clear_all()?;
-        let spec = self.deck.model().image;
-        let buttons = self.pages[self.current_page].buttons.clone();
-        for button in &buttons {
-            let to_render = match &button.states {
-                Some(states) if !states.is_empty() => {
-                    let idx = self
-                        .toggle_index
-                        .get(&button.key)
-                        .copied()
-                        .unwrap_or(0)
-                        .min(states.len() - 1);
-                    states[idx].to_button(button.key)
-                }
-                _ => button.clone(),
-            };
-            let mut surface = render::compose(&spec, &self.base_dir, &to_render);
-            if self.held.contains_key(&button.key) {
-                surface.brighten(0.3);
-            }
-            self.deck.set_key_image(button.key, &surface.encode()?)?;
+        self.blank_all()?;
+        let keys: Vec<u8> = self.pages[self.current_page]
+            .buttons
+            .iter()
+            .map(|b| b.key)
+            .collect();
+        for key in keys {
+            self.render_key(key, false)?;
         }
         Ok(())
     }
 
-    /// The effective button for a key on the current page (toggle-aware).
+    /// The effective button for a key on the current page: its toggle state's,
+    /// and a live key's label as its command last answered.
     fn effective_button(&self, key: u8) -> Option<ButtonConfig> {
         let button = self.pages[self.current_page]
             .buttons
             .iter()
             .find(|b| b.key == key)?;
-        Some(match &button.states {
+        let live_label = self
+            .live
+            .iter()
+            .find(|lk| lk.button.key == key)
+            .and_then(|lk| lk.label.clone());
+        let mut effective = match &button.states {
             Some(states) if !states.is_empty() => {
                 let idx = self
                     .toggle_index
@@ -299,7 +338,11 @@ impl Session {
                 states[idx].to_button(key)
             }
             _ => button.clone(),
-        })
+        };
+        if live_label.is_some() {
+            effective.label = live_label;
+        }
+        Some(effective)
     }
 
     /// Render a key. It is highlighted while momentarily pressed OR while its
@@ -313,8 +356,14 @@ impl Session {
         if momentary || self.held.contains_key(&key) {
             surface.brighten(0.3);
         }
-        self.deck.set_key_image(key, &surface.encode()?)?;
-        Ok(())
+        self.show(key, surface)
+    }
+
+    /// Render a key, logging a failure instead of stopping the press loop.
+    fn redraw(&mut self, key: u8, momentary: bool) {
+        if let Err(err) = self.render_key(key, momentary) {
+            eprintln!("error: key {key} render failed: {err}");
+        }
     }
 
     /// Advance a toggle key to its next state, render it, and run its action.
@@ -328,10 +377,7 @@ impl Session {
         let state = states[index].clone();
         println!("key {key} toggle -> state {index}");
 
-        let to_render = state.to_button(key);
-        let spec = self.deck.model().image;
-        let surface = render::compose(&spec, &self.base_dir, &to_render);
-        self.deck.set_key_image(key, &surface.encode()?)?;
+        self.render_key(key, false)?;
 
         if let Some(run) = &state.run {
             self.spawn_command(run);
@@ -364,12 +410,10 @@ impl Session {
                     String::new()
                 }
             };
-            let mut button = self.live[i].button.clone();
-            button.label = Some(label);
-            let spec = self.deck.model().image;
-            let surface = render::compose(&spec, &self.base_dir, &button);
-            self.deck.set_key_image(button.key, &surface.encode()?)?;
+            self.live[i].label = Some(label);
             self.live[i].next_due = now + self.live[i].interval;
+            let key = self.live[i].button.key;
+            self.render_key(key, false)?;
         }
         Ok(())
     }
@@ -407,14 +451,14 @@ impl Session {
             _ => None,
         };
         if let Some(value) = new_brightness {
-            self.brightness = value;
-            self.deck.set_brightness(value)?;
+            self.apply_brightness(value)?;
             println!("brightness -> {value}%");
             return Ok(());
         }
         match builtin {
             Builtin::Reset => {
                 self.deck.reset()?;
+                self.view.update(Frame::enter_standby);
                 println!("device reset");
             }
             Builtin::Open(target) => self.spawn_command(&system::open_command(target)),
@@ -455,8 +499,7 @@ impl Session {
         let config = Config::load(&self.config_path)?;
         config.validate(self.deck.model())?;
         if let Some(brightness) = config.brightness {
-            self.brightness = brightness;
-            self.deck.set_brightness(brightness)?;
+            self.apply_brightness(brightness)?;
         }
         self.pages = config.pages();
         let page = self.current_page.min(self.pages.len().saturating_sub(1));
@@ -494,7 +537,7 @@ impl Session {
             }
         }
         // Settle the key to its held-aware visual (persistent highlight on/off).
-        let _ = self.render_key(key, false);
+        self.redraw(key, false);
     }
 
     /// Apply a control command. `Quit` is handled by the caller.
@@ -520,13 +563,13 @@ impl Session {
             if event.kind == KeyEventKind::Released {
                 // Restore the key's normal visual when released.
                 if self.press_feedback {
-                    let _ = self.render_key(event.key, false);
+                    self.redraw(event.key, false);
                 }
                 continue;
             }
             // Pressed: flash the key first for tactile feedback.
             if self.press_feedback {
-                let _ = self.render_key(event.key, true);
+                self.redraw(event.key, true);
             }
             // Clone the action out so the borrow of `self.actions` is released
             // before we mutate other fields.
@@ -568,13 +611,15 @@ impl Session {
 
 /// Render the config and run the press-to-action loop, also servicing control
 /// messages, until `shutdown` is set or a `Quit` arrives.
+/// Every key image it sends is recorded in `view`.
 pub fn run_with_control(
-    deck: StreamDeck,
+    deck: impl Deck + 'static,
     config_path: PathBuf,
     shutdown: &AtomicBool,
     control: &Receiver<Control>,
+    view: LiveView,
 ) -> Result<()> {
-    let mut session = Session::load(deck, config_path)?;
+    let mut session = Session::load(Box::new(deck), config_path, view)?;
     println!("Running with {} mapped action(s).", session.actions.len());
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -597,9 +642,13 @@ pub fn run_with_control(
 
     // Release any latched keyboard keys before exit so none stay stuck.
     if let Some(emitter) = session.emitter.as_deref_mut() {
-        let _ = emitter.release_all();
+        if let Err(err) = emitter.release_all() {
+            eprintln!("error: releasing held keys on exit failed: {err}");
+        }
     }
-    let _ = session.deck.clear_all();
+    if let Err(err) = session.blank_all() {
+        eprintln!("error: clearing the deck on exit failed: {err}");
+    }
     Ok(())
 }
 
@@ -752,5 +801,305 @@ mod tests {
         actions.insert(1, KeyAction::Hold(vec![KeyCode(30)])); // different code
         release_dropped_holds(&mut emitter, &mut held, &actions).unwrap();
         assert!(!held.contains_key(&1));
+    }
+
+    mod live_view {
+        use super::super::*;
+        use std::cell::RefCell;
+        use std::collections::VecDeque;
+        use std::rc::Rc;
+
+        use image::{Rgb, RgbImage};
+
+        use crate::keyboard::RecordingEmitter;
+        use crate::model::Model;
+        use crate::view::KeyFrame;
+
+        /// What the stand-in deck was told, and the button reports it will give.
+        #[derive(Default)]
+        struct DeckLog {
+            resets: usize,
+            reports: VecDeque<Vec<bool>>,
+            refuse_images: bool,
+        }
+
+        struct FakeDeck {
+            model: Model,
+            log: Rc<RefCell<DeckLog>>,
+        }
+
+        impl Deck for FakeDeck {
+            fn model(&self) -> &Model {
+                &self.model
+            }
+
+            fn set_brightness(&self, _percent: u8) -> Result<()> {
+                Ok(())
+            }
+
+            fn reset(&self) -> Result<()> {
+                self.log.borrow_mut().resets += 1;
+                Ok(())
+            }
+
+            fn set_key_image(&mut self, key: u8, _encoded: &[u8]) -> Result<()> {
+                if self.log.borrow().refuse_images {
+                    let refusal = std::io::Error::other(format!("key {key} unplugged"));
+                    return Err(crate::error::Error::Io(refusal));
+                }
+                Ok(())
+            }
+
+            fn clear_all(&mut self) -> Result<()> {
+                Ok(())
+            }
+
+            fn read_button_states(&mut self, _: Option<Duration>) -> Result<Option<Vec<bool>>> {
+                Ok(self.log.borrow_mut().reports.pop_front())
+            }
+        }
+
+        fn recording_emitter() -> Result<Box<dyn KeyEmitter>> {
+            Ok(Box::new(RecordingEmitter::default()))
+        }
+
+        struct Rig {
+            session: Session,
+            view: LiveView,
+            log: Rc<RefCell<DeckLog>>,
+            base: PathBuf,
+        }
+
+        fn rig(name: &str, config: &str) -> Rig {
+            let base = std::env::temp_dir().join(format!("sd-view-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(&base).unwrap();
+            let path = base.join("config.toml");
+            std::fs::write(&path, config).unwrap();
+            let log = Rc::new(RefCell::new(DeckLog::default()));
+            let deck = FakeDeck {
+                model: Model::MK2,
+                log: log.clone(),
+            };
+            let view = LiveView::new();
+            let mut session = Session::load(Box::new(deck), path, view.clone()).unwrap();
+            session.make_emitter = recording_emitter;
+            Rig {
+                session,
+                view,
+                log,
+                base,
+            }
+        }
+
+        impl Rig {
+            /// Press `key` (all others up) and let the daemon handle it.
+            fn press(&mut self, key: u8) {
+                let mut states = vec![false; 15];
+                states[key as usize] = true;
+                self.log.borrow_mut().reports.push_back(states);
+                self.session.poll().unwrap();
+            }
+
+            fn release_all(&mut self) {
+                self.log.borrow_mut().reports.push_back(vec![false; 15]);
+                self.session.poll().unwrap();
+            }
+
+            fn tap(&mut self, key: u8) {
+                self.press(key);
+                self.release_all();
+            }
+
+            fn key(&self, key: u8) -> KeyFrame {
+                self.view.snapshot().unwrap().keys[key as usize].clone()
+            }
+
+            /// The image the daemon composes for `button`, brightened if lit.
+            fn drawn(&self, button: &str, lit: bool) -> RgbImage {
+                let config = Config::from_toml_str(&format!("[[buttons]]\n{button}")).unwrap();
+                let mut surface =
+                    render::compose(&Model::MK2.image, &self.base, &config.buttons[0]);
+                if lit {
+                    surface.brighten(0.3);
+                }
+                surface.into_canvas()
+            }
+        }
+
+        fn black() -> RgbImage {
+            RgbImage::from_pixel(72, 72, Rgb([0, 0, 0]))
+        }
+
+        const TWO_PAGES: &str = "brightness = 40\n\n\
+            [[pages]]\n[[pages.buttons]]\nkey = 0\nlabel = \"Next\"\nbuiltin = \"page_next\"\n\n\
+            [[pages]]\nname = \"Media\"\n[[pages.buttons]]\nkey = 2\nlabel = \"Play\"\ncolor = \"#223344\"\n";
+
+        #[test]
+        fn shows_the_first_page_with_every_key_once_loaded() {
+            let rig = rig("load", TWO_PAGES);
+            let frame = rig.view.snapshot().unwrap();
+            assert_eq!((frame.page.index, frame.page.name.as_deref()), (0, None));
+            assert_eq!(
+                (frame.pages, frame.brightness, frame.standby),
+                (2, Some(40), false)
+            );
+            assert_eq!(frame.keys.len(), 15);
+            assert_eq!(
+                frame.keys[0].image,
+                rig.drawn("key = 0\nlabel = \"Next\"", false)
+            );
+            assert!(frame.keys[1..].iter().all(|k| k.image == black()));
+        }
+
+        #[test]
+        fn names_no_brightness_when_the_layout_sets_none() {
+            let rig = rig("nobright", "[[buttons]]\nkey = 0\nlabel = \"A\"\n");
+            assert_eq!(rig.view.snapshot().unwrap().brightness, None);
+        }
+
+        #[test]
+        fn follows_a_page_switch_and_blanks_the_keys_it_left() {
+            let mut rig = rig("page", TWO_PAGES);
+            rig.tap(0);
+            let frame = rig.view.snapshot().unwrap();
+            assert_eq!(
+                (frame.page.index, frame.page.name.as_deref()),
+                (1, Some("Media"))
+            );
+            assert_eq!(frame.keys[0].image, black());
+            let play = "key = 2\nlabel = \"Play\"\ncolor = \"#223344\"";
+            assert_eq!(frame.keys[2].image, rig.drawn(play, false));
+        }
+
+        #[test]
+        fn shows_a_toggle_keys_next_state() {
+            let toggle = "[[buttons]]\nkey = 1\nstates = [{ label = \"On\", color = \"#00aa00\" }, { label = \"Off\", color = \"#aa0000\" }]\n";
+            let mut rig = rig("toggle", toggle);
+            assert_eq!(
+                rig.key(1).image,
+                rig.drawn("key = 1\nlabel = \"On\"\ncolor = \"#00aa00\"", false)
+            );
+            rig.tap(1);
+            assert_eq!(
+                rig.key(1).image,
+                rig.drawn("key = 1\nlabel = \"Off\"\ncolor = \"#aa0000\"", false)
+            );
+        }
+
+        #[test]
+        fn shows_a_live_label_and_keeps_it_through_a_press() {
+            let live = "[[buttons]]\nkey = 4\ncolor = \"#101010\"\nlabel = \"...\"\nwatch = \"echo 12:45\"\nbuiltin = \"brightness_up\"\n";
+            let mut rig = rig("watch", live);
+            rig.session.tick_live().unwrap();
+            let answered = rig.drawn("key = 4\ncolor = \"#101010\"\nlabel = \"12:45\"", false);
+            assert_eq!(rig.key(4).image, answered);
+            rig.press(4);
+            assert_eq!(
+                rig.key(4).image,
+                rig.drawn("key = 4\ncolor = \"#101010\"\nlabel = \"12:45\"", true)
+            );
+            rig.release_all();
+            assert_eq!(rig.key(4).image, answered);
+        }
+
+        #[test]
+        fn lights_a_pressed_key_and_marks_a_latched_one_held() {
+            let hold = "[[buttons]]\nkey = 3\nlabel = \"Fire\"\nhold = \"f\"\n";
+            let mut rig = rig("hold", hold);
+            let plain = rig.drawn("key = 3\nlabel = \"Fire\"", false);
+            let lit = rig.drawn("key = 3\nlabel = \"Fire\"", true);
+
+            rig.press(3);
+            assert_eq!(
+                rig.key(3),
+                KeyFrame {
+                    image: lit.clone(),
+                    held: true
+                }
+            );
+            rig.release_all();
+            assert_eq!(
+                rig.key(3),
+                KeyFrame {
+                    image: lit,
+                    held: true
+                },
+                "stays lit while latched"
+            );
+            rig.tap(3);
+            assert_eq!(
+                rig.key(3),
+                KeyFrame {
+                    image: plain,
+                    held: false
+                }
+            );
+        }
+
+        #[test]
+        fn flashes_a_momentary_press_without_marking_it_held() {
+            let mut rig = rig(
+                "flash",
+                "[[buttons]]\nkey = 5\nlabel = \"Go\"\nbuiltin = \"brightness_up\"\n",
+            );
+            rig.press(5);
+            assert_eq!(
+                rig.key(5),
+                KeyFrame {
+                    image: rig.drawn("key = 5\nlabel = \"Go\"", true),
+                    held: false
+                }
+            );
+            rig.release_all();
+            assert_eq!(
+                rig.key(5).image,
+                rig.drawn("key = 5\nlabel = \"Go\"", false)
+            );
+        }
+
+        #[test]
+        fn shows_standby_after_a_reset_until_the_next_full_render() {
+            let mut rig = rig("reset", TWO_PAGES);
+            rig.session.handle_control(Control::Reset).unwrap();
+            let frame = rig.view.snapshot().unwrap();
+            assert_eq!(rig.log.borrow().resets, 1);
+            assert!(frame.standby);
+            assert!(frame.keys.iter().all(|k| k.image == black()));
+
+            rig.session.handle_control(Control::Reload).unwrap();
+            let frame = rig.view.snapshot().unwrap();
+            assert!(!frame.standby);
+            assert_eq!(
+                frame.keys[0].image,
+                rig.drawn("key = 0\nlabel = \"Next\"", false)
+            );
+        }
+
+        #[test]
+        fn follows_brightness_and_leaves_the_keys() {
+            let mut rig = rig("bright", TWO_PAGES);
+            let before = rig.view.snapshot().unwrap().keys;
+            rig.session
+                .handle_control(Control::SetBrightness(70))
+                .unwrap();
+            let frame = rig.view.snapshot().unwrap();
+            assert_eq!(frame.brightness, Some(70));
+            assert_eq!(frame.keys, before);
+        }
+
+        #[test]
+        fn records_only_what_the_device_accepted() {
+            let mut rig = rig(
+                "refused",
+                "[[buttons]]\nkey = 5\nlabel = \"Go\"\nbuiltin = \"brightness_up\"\n",
+            );
+            rig.log.borrow_mut().refuse_images = true;
+            rig.press(5);
+            assert_eq!(
+                rig.key(5).image,
+                rig.drawn("key = 5\nlabel = \"Go\"", false)
+            );
+        }
     }
 }
