@@ -478,6 +478,8 @@ fn print_help() {
          \x20 layout                   the layout, as JSON\n\
          \x20 schema                   what a key may hold, as JSON\n\
          \x20 view                     what the deck shows now, as JSON (keys as PNG)\n\
+         \x20 icons [words]            Lucide icons a key may show, best matches first\n\
+         \x20 style                    the deck's palette and label, icon and layout rules\n\
          \x20 layout brightness <0-100>  store and apply brightness\n\
          \x20 key set <page> <key> <json|->  replace a key whole\n\
          \x20 key clear <page> <key>   blank a key\n\
@@ -518,7 +520,11 @@ fn remote_call(args: &[String]) -> Result<String, (u8, Problem)> {
         })
         .unwrap_or_else(|| remote::DEFAULT_URL.to_string());
     let authority = remote::authority(&url).map_err(failed)?;
-    let token = client_token().map_err(failed)?;
+    let token = match client_token() {
+        Ok(token) => Some(token),
+        Err(_) if call.is_open() => None,
+        Err(problem) => return Err(failed(problem)),
+    };
     let body = match call.body.as_deref() {
         Some("-") => {
             let mut text = String::new();
@@ -529,7 +535,7 @@ fn remote_call(args: &[String]) -> Result<String, (u8, Problem)> {
         other => other.map(String::from),
     };
     let (status, answer) =
-        remote::send(&authority, &token, &call, body.as_deref()).map_err(failed)?;
+        remote::send(&authority, token.as_deref(), &call, body.as_deref()).map_err(failed)?;
     remote::judge(status, &answer).map_err(|problem| {
         let code = if problem.name == "unreachable" { 1 } else { 2 };
         (code, problem)
