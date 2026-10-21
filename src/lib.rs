@@ -25,6 +25,7 @@ pub mod remote;
 pub mod render;
 pub mod runtime;
 pub mod schema;
+pub mod style;
 pub mod system;
 pub mod tokens;
 pub mod tray;
