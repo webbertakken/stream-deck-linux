@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -31,6 +32,7 @@ pub enum Route {
     AddPage,
     RemovePage { page: String },
     Brightness,
+    View,
 }
 
 /// Parse `method path` into a route; `None` is `not-found`.
@@ -41,6 +43,7 @@ pub fn parse_route(method: &str, path: &str) -> Option<Route> {
     match (method, parts.as_slice()) {
         ("GET", ["layout"]) => Some(Route::Layout),
         ("GET", ["schema"]) => Some(Route::Schema),
+        ("GET", ["view"]) => Some(Route::View),
         ("PUT", ["pages", page, "keys", key]) if !page.is_empty() => Some(Route::SetKey {
             page: page.to_string(),
             key: key.parse().ok()?,
@@ -111,14 +114,16 @@ pub struct ControlApi {
 impl ControlApi {
     /// Answer one request; logs who asked and how it ended.
     pub fn handle(&self, request: &ApiRequest) -> ApiResponse {
+        let started = Instant::now();
         let (caller, response) = self.decide(request);
         let outcome = response.body["error"].as_str().unwrap_or("ok");
         eprintln!(
-            "control: {} {} {} -> {} {outcome}",
+            "control: {} {} {} -> {} {outcome} in {:.1} ms",
             caller.as_deref().unwrap_or("-"),
             request.method,
             request.path,
-            response.status
+            response.status,
+            started.elapsed().as_secs_f64() * 1000.0
         );
         response
     }
@@ -148,15 +153,10 @@ impl ControlApi {
     }
 
     fn answer(&self, route: Route, request: &ApiRequest) -> ApiResponse {
-        let (config, bytes) = match read_config(&self.config_path) {
-            Ok(read) => read,
-            Err(detail) => return refusal(500, "unreadable", detail),
-        };
-        let revision = layout::revision(&bytes);
-
         let edit = match route {
-            Route::Layout => return ok(layout_body(&config, &self.model, &revision)),
+            Route::View => return self.view(),
             Route::Schema => return ok(schema::schema()),
+            Route::Layout => return self.layout(),
             Route::SetKey { page, key } => match parse_button(&request.body, key) {
                 Ok(button) => Edit::SetKey {
                     page,
@@ -177,6 +177,11 @@ impl ControlApi {
             },
         };
 
+        let (config, bytes) = match read_config(&self.config_path) {
+            Ok(read) => read,
+            Err(detail) => return refusal(500, "unreadable", detail),
+        };
+        let revision = layout::revision(&bytes);
         if let Some(expected) = &request.if_match {
             let expected = expected.trim().trim_matches('"');
             if expected != revision {
@@ -200,6 +205,35 @@ impl ControlApi {
             body["page"] = json!(page);
         }
         ok(body)
+    }
+}
+
+impl ControlApi {
+    /// The layout on disk, with its revision.
+    fn layout(&self) -> ApiResponse {
+        match read_config(&self.config_path) {
+            Ok((config, bytes)) => ok(layout_body(&config, &self.model, &layout::revision(&bytes))),
+            Err(detail) => refusal(500, "unreadable", detail),
+        }
+    }
+
+    /// What the device shows, as the daemon last drew it.
+    fn view(&self) -> ApiResponse {
+        let Some(frame) = self.view.snapshot() else {
+            return refusal(
+                503,
+                "not-ready",
+                "the daemon has not drawn the deck yet; ask again shortly",
+            );
+        };
+        match frame.to_json() {
+            Ok(body) => ok(body),
+            Err(err) => refusal(
+                500,
+                "unencodable",
+                format!("a key image would not encode: {err}"),
+            ),
+        }
     }
 }
 
@@ -350,6 +384,13 @@ mod tests {
         }
     }
 
+    fn first_page() -> crate::view::PageRef {
+        crate::view::PageRef {
+            index: 0,
+            name: None,
+        }
+    }
+
     const START: &str = "brightness = 40\n\n[[buttons]]\nkey = 0\nlabel = \"Home\"\n";
 
     #[test]
@@ -414,6 +455,62 @@ mod tests {
         request.authorization = Some(format!("Bearer {}", fx.token));
         request.path = "/api/v1/nope".into();
         assert_eq!(fx.api.handle(&request).body["error"], "not-found");
+    }
+
+    #[test]
+    fn parses_the_view_route() {
+        assert_eq!(parse_route("GET", "/api/v1/view"), Some(Route::View));
+        assert_eq!(parse_route("PUT", "/api/v1/view"), None);
+    }
+
+    #[test]
+    fn refuses_the_view_without_a_token() {
+        let fx = fixture("view-auth", START);
+        let response = fx.api.handle(&ApiRequest {
+            method: "GET".into(),
+            path: "/api/v1/view".into(),
+            ..Default::default()
+        });
+        assert_eq!(
+            (response.status, response.body["error"].as_str()),
+            (401, Some("no-token"))
+        );
+    }
+
+    #[test]
+    fn answers_not_ready_until_the_daemon_has_drawn() {
+        let fx = fixture("view-wait", START);
+        let response = fx.call("GET", "/api/v1/view", "");
+        assert_eq!(
+            (response.status, response.body["error"].as_str()),
+            (503, Some("not-ready"))
+        );
+        assert!(response.body["detail"]
+            .as_str()
+            .is_some_and(|d| !d.is_empty()));
+    }
+
+    #[test]
+    fn answers_the_view_the_daemon_drew() {
+        let fx = fixture("view", START);
+        let mut frame = crate::view::Frame::new(&Model::MK2, first_page(), 1);
+        frame.set_brightness(40);
+        fx.api.view.publish(frame.clone());
+
+        let response = fx.call("GET", "/api/v1/view", "");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, frame.to_json().unwrap());
+        assert_eq!(response.body["keys"].as_array().unwrap().len(), 15);
+    }
+
+    #[test]
+    fn answers_the_view_even_when_the_config_is_unreadable() {
+        let fx = fixture("view-broken", START);
+        let frame = crate::view::Frame::new(&Model::MK2, first_page(), 1);
+        fx.api.view.publish(frame);
+        std::fs::write(&fx.api.config_path, "this is = = not toml").unwrap();
+        assert_eq!(fx.call("GET", "/api/v1/view", "").status, 200);
     }
 
     #[test]

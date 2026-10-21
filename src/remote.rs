@@ -18,7 +18,7 @@ pub const DEFAULT_URL: &str = "http://127.0.0.1:57617";
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The verbs this module answers; `main` routes these words here.
-pub const VERBS: &[&str] = &["layout", "schema", "key", "page"];
+pub const VERBS: &[&str] = &["layout", "schema", "view", "key", "page"];
 
 /// One request to the control API.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +93,7 @@ pub fn plan(args: &[String]) -> Result<Call, Problem> {
     match words.as_slice() {
         ["layout"] => Ok(call("GET", "/api/v1/layout".into(), None)),
         ["schema"] => Ok(call("GET", "/api/v1/schema".into(), None)),
+        ["view"] => Ok(call("GET", "/api/v1/view".into(), None)),
         ["layout", "brightness", value] => {
             let value: u8 = value
                 .parse()
@@ -118,7 +119,7 @@ pub fn plan(args: &[String]) -> Result<Call, Problem> {
         ["page", "add", name] => Ok(call("POST", "/api/v1/pages".into(), Some(json!({ "name": name }).to_string()))),
         ["page", "remove", page] => Ok(call("DELETE", format!("/api/v1/pages/{}", encode(page)), Some("{}".into()))),
         _ => Err(usage(
-            "streamdeck layout | schema | layout brightness <0-100> | key set <page> <key> <json|-> | \
+            "streamdeck layout | schema | view | layout brightness <0-100> | key set <page> <key> <json|-> | \
              key clear <page> <key> | page add <name> | page remove <page>  [--revision <rev>] [--url <url>]",
         )),
     }
@@ -262,6 +263,7 @@ mod tests {
         let cases = [
             ("layout", "GET", "/api/v1/layout", None),
             ("schema", "GET", "/api/v1/schema", None),
+            ("view", "GET", "/api/v1/view", None),
             (
                 "layout brightness 70",
                 "PUT",
@@ -322,6 +324,7 @@ mod tests {
             "layout --colour red",
             "layout --revision",
             "layout --url",
+            "view now",
         ] {
             assert_eq!(plan(&words(line)).unwrap_err().name, "usage", "{line}");
         }
