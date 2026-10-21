@@ -27,6 +27,7 @@ pub mod schema;
 pub mod system;
 pub mod tokens;
 pub mod tray;
+pub mod view;
 pub mod webui;
 
 pub use config::{ButtonConfig, Config};
