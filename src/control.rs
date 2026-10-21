@@ -133,8 +133,13 @@ impl ControlApi {
         let started = Instant::now();
         let (caller, response) = self.decide(request);
         let outcome = response.body["error"].as_str().unwrap_or("ok");
+        let query = request
+            .query
+            .as_deref()
+            .map(|q| format!("?{q}"))
+            .unwrap_or_default();
         eprintln!(
-            "control: {} {} {} -> {} {outcome} in {:.1} ms",
+            "control: {} {} {}{query} -> {} {outcome} in {:.1} ms",
             caller.as_deref().unwrap_or("-"),
             request.method,
             request.path,
