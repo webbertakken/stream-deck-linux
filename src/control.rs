@@ -12,10 +12,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::config::{ButtonConfig, Config};
+use crate::icons;
 use crate::layout::{self, Edit, EditError};
 use crate::model::Model;
 use crate::runtime::Control;
 use crate::schema;
+use crate::style;
 use crate::tokens::TokenStore;
 use crate::view::LiveView;
 
@@ -33,6 +35,16 @@ pub enum Route {
     RemovePage { page: String },
     Brightness,
     View,
+    Icons,
+    Style,
+}
+
+impl Route {
+    /// Open routes need no token: they answer this build's catalogue, the
+    /// same for every caller, and change nothing.
+    pub fn is_open(&self) -> bool {
+        matches!(self, Route::Icons | Route::Style)
+    }
 }
 
 /// Parse `method path` into a route; `None` is `not-found`.
@@ -44,6 +56,8 @@ pub fn parse_route(method: &str, path: &str) -> Option<Route> {
         ("GET", ["layout"]) => Some(Route::Layout),
         ("GET", ["schema"]) => Some(Route::Schema),
         ("GET", ["view"]) => Some(Route::View),
+        ("GET", ["icons"]) => Some(Route::Icons),
+        ("GET", ["style"]) => Some(Route::Style),
         ("PUT", ["pages", page, "keys", key]) if !page.is_empty() => Some(Route::SetKey {
             page: page.to_string(),
             key: key.parse().ok()?,
@@ -66,6 +80,8 @@ pub fn parse_route(method: &str, path: &str) -> Option<Route> {
 pub struct ApiRequest {
     pub method: String,
     pub path: String,
+    /// The query string, after `?`.
+    pub query: Option<String>,
     pub authorization: Option<String>,
     pub if_match: Option<String>,
     pub body: String,
@@ -129,11 +145,15 @@ impl ControlApi {
     }
 
     fn decide(&self, request: &ApiRequest) -> (Option<String>, ApiResponse) {
-        let Some(token) = request
+        let bearer = request
             .authorization
             .as_deref()
-            .and_then(|v| v.strip_prefix("Bearer "))
-        else {
+            .and_then(|v| v.strip_prefix("Bearer "));
+        if let Some(route) = parse_route(&request.method, &request.path).filter(Route::is_open) {
+            let caller = bearer.and_then(|token| self.tokens.caller_of(token));
+            return (caller, self.answer(route, request));
+        }
+        let Some(token) = bearer else {
             return (
                 None,
                 refusal(401, "no-token", "send Authorization: Bearer <token>"),
@@ -156,6 +176,11 @@ impl ControlApi {
         let edit = match route {
             Route::View => return self.view(),
             Route::Schema => return ok(schema::schema()),
+            Route::Icons => {
+                let words = query_param(request.query.as_deref(), "q").unwrap_or_default();
+                return ok(icons::search(&words).to_json());
+            }
+            Route::Style => return ok(style::style()),
             Route::Layout => return self.layout(),
             Route::SetKey { page, key } => match parse_button(&request.body, key) {
                 Ok(button) => Edit::SetKey {
@@ -304,6 +329,15 @@ fn write_config(path: &Path, config: &Config) -> Result<Vec<u8>, String> {
     Ok(toml.into_bytes())
 }
 
+/// The value of `name` in a query string, `+` and `%XX` decoded.
+fn query_param(query: Option<&str>, name: &str) -> Option<String> {
+    query?
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| percent_decode(&value.replace('+', " ")))
+}
+
 /// Decode `%XX` escapes in one path segment.
 fn percent_decode(segment: &str) -> String {
     let bytes = segment.as_bytes();
@@ -373,6 +407,7 @@ mod tests {
             self.api.handle(&ApiRequest {
                 method: method.into(),
                 path: path.into(),
+                query: None,
                 authorization: Some(format!("Bearer {}", self.token)),
                 if_match: if_match.map(String::from),
                 body: body.into(),
@@ -455,6 +490,92 @@ mod tests {
         request.authorization = Some(format!("Bearer {}", fx.token));
         request.path = "/api/v1/nope".into();
         assert_eq!(fx.api.handle(&request).body["error"], "not-found");
+    }
+
+    fn open_get(fx: &Fixture, path: &str, query: Option<&str>) -> ApiResponse {
+        fx.api.handle(&ApiRequest {
+            method: "GET".into(),
+            path: path.into(),
+            query: query.map(String::from),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn parses_the_icons_and_style_routes_as_open_reads() {
+        assert_eq!(parse_route("GET", "/api/v1/icons"), Some(Route::Icons));
+        assert_eq!(parse_route("GET", "/api/v1/style"), Some(Route::Style));
+        assert_eq!(parse_route("POST", "/api/v1/icons"), None);
+        assert_eq!(parse_route("PUT", "/api/v1/style"), None);
+        assert!(Route::Icons.is_open() && Route::Style.is_open());
+        assert!(!Route::Layout.is_open() && !Route::Schema.is_open() && !Route::View.is_open());
+    }
+
+    #[test]
+    fn searches_icons_without_a_token_best_first() {
+        let fx = fixture("icons", START);
+        let response = open_get(&fx, "/api/v1/icons", Some("q=mail"));
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert_eq!(response.body["icons"][0]["name"], "mail");
+        assert_eq!(response.body, crate::icons::search("mail").to_json());
+        for query in ["q=arrow+up", "q=Arrow%20Up", "x=1&q=arrow+up"] {
+            let found = open_get(&fx, "/api/v1/icons", Some(query));
+            assert_eq!(found.body["icons"][0]["name"], "arrow-up", "{query}");
+        }
+    }
+
+    #[test]
+    fn lists_the_first_icons_by_name_without_words() {
+        let fx = fixture("icons-all", START);
+        for query in [None, Some(""), Some("q=")] {
+            let response = open_get(&fx, "/api/v1/icons", query);
+            assert_eq!(
+                response.body["total"],
+                crate::icons::ICONS.len(),
+                "{query:?}"
+            );
+            assert_eq!(response.body["icons"].as_array().unwrap().len(), 40);
+        }
+    }
+
+    #[test]
+    fn answers_the_style_without_a_token() {
+        let fx = fixture("style", START);
+        let response = open_get(&fx, "/api/v1/style", None);
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, crate::style::style());
+    }
+
+    #[test]
+    fn refuses_an_unknown_icon_and_an_image_with_an_icon_as_invalid() {
+        let fx = fixture("icon-refuse", START);
+        let cases = [
+            (
+                r#"{"icon":"mial"}"#,
+                "unknown icon 'mial'; did you mean mail?",
+            ),
+            (
+                r#"{"icon":"mail","image":"x.png"}"#,
+                "key 4 sets both image and icon; a key shows one picture",
+            ),
+        ];
+        for (body, detail) in cases {
+            let response = fx.call("PUT", "/api/v1/pages/0/keys/4", body);
+            assert_eq!(
+                (response.status, response.body["error"].as_str()),
+                (422, Some("invalid")),
+                "{body}"
+            );
+            assert_eq!(response.body["detail"], detail);
+        }
+        assert_eq!(fx.file(), START);
+        let set = fx.call(
+            "PUT",
+            "/api/v1/pages/0/keys/4",
+            r##"{"icon":"mail","color":"#2E5A88"}"##,
+        );
+        assert_eq!(set.status, 200, "{}", set.body);
+        assert!(fx.file().contains("icon = \"mail\""));
     }
 
     #[test]
