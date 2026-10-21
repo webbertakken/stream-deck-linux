@@ -79,9 +79,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
     for (i, row) in rows.iter_mut().enumerate() {
         row[0] = i;
     }
-    for j in 0..=b.len() {
-        rows[0][j] = j;
-    }
+    rows[0] = (0..=b.len()).collect();
     for i in 1..=a.len() {
         for j in 1..=b.len() {
             let cost = usize::from(a[i - 1] != b[j - 1]);
