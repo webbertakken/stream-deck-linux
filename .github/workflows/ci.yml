@@ -25,6 +25,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Vendored Lucide icons match their checksums
+        run: cd assets/lucide && sha256sum -c --quiet SHA256SUMS
+
       - name: Formatting
         run: cargo fmt --all --check
 
