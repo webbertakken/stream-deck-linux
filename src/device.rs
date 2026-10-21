@@ -166,6 +166,42 @@ impl StreamDeck {
     }
 }
 
+/// What the daemon needs from a deck: draw keys, light it, read its buttons.
+/// [`StreamDeck`] is the real one; tests drive the daemon with a stand-in.
+pub trait Deck {
+    fn model(&self) -> &Model;
+    fn set_brightness(&self, percent: u8) -> Result<()>;
+    fn reset(&self) -> Result<()>;
+    fn set_key_image(&mut self, key: u8, encoded: &[u8]) -> Result<()>;
+    fn clear_all(&mut self) -> Result<()>;
+    fn read_button_states(&mut self, timeout: Option<Duration>) -> Result<Option<Vec<bool>>>;
+}
+
+impl Deck for StreamDeck {
+    fn model(&self) -> &Model {
+        StreamDeck::model(self)
+    }
+
+    fn set_brightness(&self, percent: u8) -> Result<()> {
+        StreamDeck::set_brightness(self, percent)
+    }
+
+    fn reset(&self) -> Result<()> {
+        StreamDeck::reset(self)
+    }
+
+    fn set_key_image(&mut self, key: u8, encoded: &[u8]) -> Result<()> {
+        StreamDeck::set_key_image(self, key, encoded)
+    }
+
+    fn clear_all(&mut self) -> Result<()> {
+        StreamDeck::clear_all(self)
+    }
+
+    fn read_button_states(&mut self, timeout: Option<Duration>) -> Result<Option<Vec<bool>>> {
+        StreamDeck::read_button_states(self, timeout)
+    }
+}
 /// Extract a NUL/whitespace-trimmed ASCII string from a feature report slice.
 fn extract_string(bytes: &[u8]) -> String {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());

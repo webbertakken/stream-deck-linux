@@ -19,6 +19,7 @@ use crate::model::Model;
 use crate::render;
 use crate::runtime::Control;
 use crate::tokens::{self, TokenStore};
+use crate::view::LiveView;
 
 const INDEX_HTML: &str = include_str!("../assets/web/index.html");
 const APP_JS: &str = include_str!("../assets/web/app.js");
@@ -48,6 +49,7 @@ impl WebUi {
         model: Model,
         config_path: PathBuf,
         control: Sender<Control>,
+        view: LiveView,
     ) -> Result<Self> {
         let server = Server::http(addr).map_err(|err| Error::Web(err.to_string()))?;
         let ip = server
@@ -63,6 +65,7 @@ impl WebUi {
             model,
             tokens: TokenStore::new(tokens::default_dir()),
             control: control.clone(),
+            view,
         };
         Ok(Self {
             server,
