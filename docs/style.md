@@ -26,7 +26,7 @@ AA contrast for text (4.5:1); a test proves it for every colour.
 
 - One or two words, in title case.
 - Say what pressing the key does.
-- At most 10 characters a line.
+- At most 10 characters a line. A program setting a key through the control API (`streamdeck key set`) is refused as `invalid` for a longer line; the editor and hand edits are not.
 - White on the key's palette colour: leave text_color unset.
 
 ## Icons
