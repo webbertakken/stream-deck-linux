@@ -143,9 +143,15 @@ impl WebUi {
         }
 
         if path.starts_with(control::PREFIX) {
-            let authorization = header("Authorization");
-            let if_match = header("If-Match");
-            return self.serve_control(request, path.to_string(), authorization, if_match);
+            let call = ApiRequest {
+                method: method.as_str().to_uppercase(),
+                path: path.to_string(),
+                query: url.split_once('?').map(|(_, query)| query.to_string()),
+                authorization: header("Authorization"),
+                if_match: header("If-Match"),
+                body: String::new(),
+            };
+            return self.serve_control(request, call);
         }
 
         match (&method, path) {
@@ -170,19 +176,13 @@ impl WebUi {
             (Method::Post, "/api/state") => self.post_state(request),
             (Method::Post, "/api/brightness") => self.post_brightness(request),
             (Method::Get, p) if p.starts_with("/api/preview/") => self.get_preview(request, p),
+            (Method::Get, p) if p.starts_with("/api/lucide/") => get_lucide_svg(request, p),
             _ => respond(request, 404, "text/plain", b"not found"),
         }
     }
 
-    fn serve_control(
-        &self,
-        mut request: Request,
-        path: String,
-        authorization: Option<String>,
-        if_match: Option<String>,
-    ) -> Result<()> {
-        let mut body = String::new();
-        if let Err(err) = request.as_reader().read_to_string(&mut body) {
+    fn serve_control(&self, mut request: Request, mut call: ApiRequest) -> Result<()> {
+        if let Err(err) = request.as_reader().read_to_string(&mut call.body) {
             let refusal = serde_json::json!({ "error": "bad-json", "detail": err.to_string() });
             return respond(
                 request,
@@ -191,13 +191,7 @@ impl WebUi {
                 refusal.to_string().as_bytes(),
             );
         }
-        let answer = self.api.handle(&ApiRequest {
-            method: request.method().as_str().to_uppercase(),
-            path,
-            authorization,
-            if_match,
-            body,
-        });
+        let answer = self.api.handle(&call);
         let bytes = serde_json::to_vec(&answer.body).map_err(|e| Error::Web(e.to_string()))?;
         respond(request, answer.status, "application/json", &bytes)
     }
@@ -330,6 +324,19 @@ impl WebUi {
             });
         let png = render::button_png(&self.model.image, &self.base_dir, &button)?;
         respond(request, 200, "image/png", &png)
+    }
+}
+
+/// `GET /api/lucide/<name>.svg`: an embedded Lucide icon, for the editor's
+/// icon picker. Only names in the embedded table answer.
+fn get_lucide_svg(request: Request, path: &str) -> Result<()> {
+    let icon = path
+        .strip_prefix("/api/lucide/")
+        .and_then(|rest| rest.strip_suffix(".svg"))
+        .and_then(crate::icons::find);
+    match icon {
+        Some(icon) => respond(request, 200, "image/svg+xml", icon.svg),
+        None => respond(request, 404, "text/plain", b"no such icon"),
     }
 }
 
