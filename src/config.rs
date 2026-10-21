@@ -67,6 +67,10 @@ pub struct ButtonConfig {
     /// config file's directory; `~` expands to `$HOME`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<PathBuf>,
+    /// A Lucide icon by name (e.g. `mail`), drawn centred in `text_color`;
+    /// above the label when there is one. Not with `image`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// Solid colour fallback as `#RRGGBB` or `RRGGBB`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -115,6 +119,8 @@ pub struct ButtonState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<String>,
@@ -129,6 +135,7 @@ impl ButtonState {
         ButtonConfig {
             key,
             image: self.image.clone(),
+            icon: self.icon.clone(),
             color: self.color.clone(),
             label: self.label.clone(),
             text_color: self.text_color.clone(),
@@ -262,14 +269,24 @@ fn validate_buttons(
 /// toggle states).
 fn validate_one(button: &ButtonConfig, page_count: usize, names: &[Option<String>]) -> Result<()> {
     if button.image.is_none()
+        && button.icon.is_none()
         && button.color.is_none()
         && button.label.is_none()
         && button.watch.is_none()
     {
         return Err(Error::ConfigInvalid(format!(
-            "key {} has no image, color, label or watch",
+            "key {} has no image, icon, color, label or watch",
             button.key
         )));
+    }
+    if button.image.is_some() && button.icon.is_some() {
+        return Err(Error::ConfigInvalid(format!(
+            "key {} sets both image and icon; a key shows one picture",
+            button.key
+        )));
+    }
+    if let Some(name) = &button.icon {
+        crate::icons::resolve(name).map_err(Error::ConfigInvalid)?;
     }
     let _ = button.rgb()?;
     let _ = button.text_rgb()?;
@@ -445,7 +462,7 @@ run = "amixer set Master toggle"
     fn validate_rejects_button_without_visual() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 2\nrun = \"true\"\n").unwrap();
         let err = config.validate(&Model::MK2).unwrap_err();
-        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color")));
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, icon, color")));
     }
 
     #[test]
@@ -473,7 +490,7 @@ run = "amixer set Master toggle"
             .unwrap()
             .validate(&Model::MK2)
             .unwrap_err();
-        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color")));
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, icon, color")));
     }
 
     #[test]
@@ -592,7 +609,7 @@ run = "amixer set Master toggle"
     fn validate_rejects_hold_without_visual() {
         let config = Config::from_toml_str("[[buttons]]\nkey = 0\nhold = \"f\"\n").unwrap();
         let err = config.validate(&Model::MK2).unwrap_err();
-        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, color")));
+        assert!(matches!(err, Error::ConfigInvalid(m) if m.contains("no image, icon, color")));
     }
 
     #[test]
@@ -622,6 +639,83 @@ run = "amixer set Master toggle"
         assert!(serialised.contains("hold = \"ctrl+shift+f\""));
         let reparsed = Config::from_toml_str(&serialised).unwrap();
         assert_eq!(config, reparsed);
+    }
+
+    #[test]
+    fn validate_accepts_an_icon_with_or_without_label_and_colour() {
+        for toml in [
+            "[[buttons]]\nkey = 0\nicon = \"mail\"\nlabel = \"Mail\"\ncolor = \"#2E5A88\"\n",
+            "[[buttons]]\nkey = 0\nicon = \"mail\"\n",
+        ] {
+            let config = Config::from_toml_str(toml).unwrap();
+            assert!(config.validate(&Model::MK2).is_ok(), "{toml}");
+            assert_eq!(config.buttons[0].icon.as_deref(), Some("mail"));
+        }
+    }
+
+    #[test]
+    fn validate_refuses_an_image_and_an_icon_on_one_key() {
+        let toml = "[[buttons]]\nkey = 3\nicon = \"mail\"\nimage = \"x.png\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(
+            matches!(&err, Error::ConfigInvalid(m) if m == "key 3 sets both image and icon; a key shows one picture"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn validate_refuses_an_unknown_icon_naming_close_ones() {
+        let toml = "[[buttons]]\nkey = 0\nicon = \"mial\"\n";
+        let err = Config::from_toml_str(toml)
+            .unwrap()
+            .validate(&Model::MK2)
+            .unwrap_err();
+        assert!(
+            matches!(&err, Error::ConfigInvalid(m) if m == "unknown icon 'mial'; did you mean mail?"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn validate_holds_toggle_states_to_the_icon_rules() {
+        let state = |extra: &str| {
+            format!("[[buttons]]\nkey = 0\n[[buttons.states]]\nicon = \"mic\"\n[[buttons.states]]\n{extra}\n")
+        };
+        let ok = Config::from_toml_str(&state("icon = \"mic-off\"")).unwrap();
+        assert!(ok.validate(&Model::MK2).is_ok());
+        assert_eq!(
+            ok.buttons[0].states.as_ref().unwrap()[0]
+                .to_button(0)
+                .icon
+                .as_deref(),
+            Some("mic")
+        );
+        for (extra, why) in [
+            ("icon = \"mik\"", "unknown icon 'mik'"),
+            ("icon = \"mic\"\nimage = \"x.png\"", "both image and icon"),
+        ] {
+            let err = Config::from_toml_str(&state(extra))
+                .unwrap()
+                .validate(&Model::MK2)
+                .unwrap_err();
+            assert!(
+                matches!(&err, Error::ConfigInvalid(m) if m.contains(why)),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn toml_round_trips_with_icon() {
+        let config =
+            Config::from_toml_str("[[buttons]]\nkey = 0\nicon = \"mail\"\nlabel = \"Mail\"\n")
+                .unwrap();
+        let serialised = config.to_toml_string().unwrap();
+        assert!(serialised.contains("icon = \"mail\""), "{serialised}");
+        assert_eq!(Config::from_toml_str(&serialised).unwrap(), config);
     }
 
     #[test]

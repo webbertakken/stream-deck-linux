@@ -13,6 +13,7 @@ pub const API_VERSION: u32 = 1;
 pub const FIELDS: &[(&str, &str)] = &[
     ("key", "Hardware key index, 0-based, left to right then top to bottom (set by the route)."),
     ("image", "Picture file on the host (PNG/JPEG); relative paths resolve next to the config, ~ is $HOME."),
+    ("icon", "A Lucide icon by name (e.g. mail), drawn centred in text_color over color; above a smaller label when there is one. Search names with GET /api/v1/icons."),
     ("color", "Solid background, #RRGGBB."),
     ("label", "Centred text drawn over the background, shrunk to fit."),
     ("text_color", "Label colour, #RRGGBB (default white)."),
@@ -21,13 +22,15 @@ pub const FIELDS: &[(&str, &str)] = &[
     ("macro", "Array of shell commands run in order on press."),
     ("watch", "Shell command whose stdout becomes the label, refreshed every `interval` seconds."),
     ("interval", "Refresh seconds for `watch` (default 5, minimum 1)."),
-    ("states", "Toggle key: array of states cycled on press, each with label, color, image, text_color and one of run or builtin."),
+    ("states", "Toggle key: array of states cycled on press, each with label, color, image, icon, text_color and one of run or builtin."),
     ("hold", "Keyboard key or `+` combo held down on press and released on the next press; see `hold_keys`."),
 ];
 
 /// Rules a button must meet; the daemon refuses a change that breaks one.
 pub const RULES: &[&str] = &[
-    "A key needs at least one of image, color, label or watch.",
+    "A key needs at least one of image, icon, color, label or watch.",
+    "A key shows an image or an icon, not both.",
+    "An icon is a Lucide name this build knows; an unknown one is refused with close names.",
     "A key has at most one action: run, builtin, macro, hold, or states.",
     "A key appears at most once per page.",
     "Unknown fields are refused.",
@@ -90,6 +93,7 @@ mod tests {
         let full = ButtonConfig {
             key: 0,
             image: Some("x.png".into()),
+            icon: Some("mail".into()),
             color: Some("#000000".into()),
             run: Some("x".into()),
             builtin: Some("reset".into()),
