@@ -162,9 +162,9 @@ impl KeySurface {
     pub fn brighten(&mut self, amount: f32) {
         let a = amount.clamp(0.0, 1.0);
         for pixel in self.canvas.pixels_mut() {
-            for c in 0..3 {
-                let v = pixel.0[c] as f32;
-                pixel.0[c] = (v + (255.0 - v) * a).round() as u8;
+            for channel in pixel.0.iter_mut() {
+                let v = *channel as f32;
+                *channel = (v + (255.0 - v) * a).round() as u8;
             }
         }
     }
